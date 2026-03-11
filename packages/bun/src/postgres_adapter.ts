@@ -15,7 +15,7 @@ import type {
   ChimpbaseCollectionFindOptions,
   ChimpbaseCollectionPatch,
   ChimpbaseKvListOptions,
-  ChimpbaseQueueSendOptions,
+  ChimpbaseQueueEnqueueOptions,
   ChimpbaseStreamEvent,
   ChimpbaseStreamReadOptions,
 } from "@chimpbase/runtime";
@@ -410,7 +410,7 @@ export function createPostgresEngineAdapter(pool: Pool): ChimpbaseEngineAdapter 
       const result = await queryable().query(normalizePostgresSql(sql), [...params]);
       return result.rows as T[];
     },
-    async queueSend<TPayload = unknown>(name: string, payload: TPayload, options?: ChimpbaseQueueSendOptions) {
+    async queueEnqueue<TPayload = unknown>(name: string, payload: TPayload, options?: ChimpbaseQueueEnqueueOptions) {
       const availableAtMs = Date.now() + Math.max(0, options?.delayMs ?? 0);
       await queryable().query(
         `
@@ -437,7 +437,7 @@ export function createPostgresEngineAdapter(pool: Pool): ChimpbaseEngineAdapter 
         transactionClient = null;
       }
     },
-    async streamPublish<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number> {
+    async streamAppend<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number> {
       const result = await queryable().query<{ id: number }>(
         `
           INSERT INTO _chimpbase_stream_events (

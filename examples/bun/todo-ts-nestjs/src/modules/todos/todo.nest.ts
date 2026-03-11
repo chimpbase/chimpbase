@@ -31,7 +31,7 @@ import {
 import {
   captureTodoCompletedDlq,
   notifyTodoCompleted,
-} from "./todo.queues.ts";
+} from "./todo.workers.ts";
 import { seedDemoWorkspace } from "./todo.seed.actions.ts";
 import type {
   CreateTodoInput,
@@ -173,7 +173,7 @@ export class TodoSubscriptionsService {
 }
 
 @Injectable()
-export class TodoQueuesService {
+export class TodoWorkersService {
   async notifyTodoCompleted(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await notifyTodoCompleted(ctx, todo);
   }
@@ -187,7 +187,7 @@ export class TodoQueuesService {
 }
 
 @Module({
-  exports: [TodoActionsService, TodoSubscriptionsService, TodoQueuesService],
-  providers: [TodoActionsService, TodoSubscriptionsService, TodoQueuesService],
+  exports: [TodoActionsService, TodoSubscriptionsService, TodoWorkersService],
+  providers: [TodoActionsService, TodoSubscriptionsService, TodoWorkersService],
 })
 export class TodoFeatureModule {}

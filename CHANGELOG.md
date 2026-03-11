@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.2 - 2026-03-11
+
+Big-bang alpha naming cleanup across the durable primitives.
+
+### Changed
+
+- renamed durable queue handlers from `queue(...)` / `@Queue(...)` to `worker(...)` / `@Worker(...)`
+- renamed job dispatch from `ctx.queue.send(...)` to `ctx.queue.enqueue(...)`
+- renamed durable stream writes from `ctx.stream.publish(...)` to `ctx.stream.append(...)`
+- updated examples, docs and tests to use the new queue and stream vocabulary consistently
+
 ## 0.1.1 - 2026-03-11
 
 Refines the alpha API surface without changing the overall release model.

@@ -10,9 +10,9 @@ Most application code should use `@chimpbase/runtime` and a host package such as
 
 - engine execution model
 - host registration contracts
-- action, subscription, queue and workflow orchestration internals
+- action, subscription, worker and workflow orchestration internals
 
-## 0.1.1 distribution model
+## 0.1.2 distribution model
 
 `@chimpbase/core` is published as TypeScript source for the alpha release.
 

@@ -1,6 +1,6 @@
 import {
   action,
-  queue,
+  worker,
   subscription,
 } from "@chimpbase/runtime";
 import { createChimpbase } from "@chimpbase/bun";
@@ -40,7 +40,7 @@ import {
 import {
   captureTodoCompletedDlq,
   notifyTodoCompleted,
-} from "./src/modules/todos/todo.queues.ts";
+} from "./src/modules/todos/todo.workers.ts";
 import { seedDemoWorkspace } from "./src/modules/todos/todo.seed.actions.ts";
 
 const EXAMPLE_ENV_FILE = ".env";
@@ -77,8 +77,8 @@ export async function createTodoApplication() {
     action("addTodoNote", addTodoNote),
     action("listTodoNotes", listTodoNotes),
     action("listTodoActivityStream", listTodoActivityStream),
-    queue("todo.completed.notify", notifyTodoCompleted),
-    queue("todo.completed.notify.dlq", captureTodoCompletedDlq, { dlq: false }),
+    worker("todo.completed.notify", notifyTodoCompleted),
+    worker("todo.completed.notify.dlq", captureTodoCompletedDlq, { dlq: false }),
     action("seedDemoWorkspace", seedDemoWorkspace),
   );
   return {

@@ -1,6 +1,6 @@
 import {
   Action,
-  Queue,
+  Worker,
   Subscription,
   type ChimpbaseContext,
   type ChimpbaseDlqEnvelope,
@@ -36,7 +36,7 @@ import {
 import {
   captureTodoCompletedDlq,
   notifyTodoCompleted,
-} from "./todo.queues.ts";
+} from "./todo.workers.ts";
 import { seedDemoWorkspace } from "./todo.seed.actions.ts";
 import type {
   CreateTodoInput,
@@ -189,12 +189,12 @@ export class TodoModule {
     return await listTodoActivityStream(ctx, input);
   }
 
-  @Queue("todo.completed.notify")
+  @Worker("todo.completed.notify")
   static async notifyTodoCompleted(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await notifyTodoCompleted(ctx, todo);
   }
 
-  @Queue("todo.completed.notify.dlq", { dlq: false })
+  @Worker("todo.completed.notify.dlq", { dlq: false })
   static async captureTodoCompletedDlq(
     ctx: ChimpbaseContext,
     envelope: ChimpbaseDlqEnvelope<TodoRecord>,

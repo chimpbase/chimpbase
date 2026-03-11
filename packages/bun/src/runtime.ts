@@ -10,11 +10,11 @@ import {
   loadChimpbaseEntrypoint,
   type ChimpbaseActionExecutionResult,
   type ChimpbaseProjectConfig,
-  type ChimpbaseQueueRegistration,
   type ChimpbaseRegistry,
   type ChimpbaseQueueExecutionResult,
   type ChimpbaseRouteExecutionResult,
   type ChimpbaseTelemetryRecord,
+  type ChimpbaseWorkerRegistration,
 } from "@chimpbase/core";
 import {
   describeWorkflow,
@@ -22,11 +22,11 @@ import {
   registerFrom as registerEntriesFrom,
   type ChimpbaseActionHandler,
   type ChimpbaseRegistration,
-  type ChimpbaseQueueDefinition,
-  type ChimpbaseQueueHandler,
   type ChimpbaseRouteEnv,
   type ChimpbaseRouteHandler,
   type ChimpbaseSubscriptionHandler,
+  type ChimpbaseWorkerDefinition,
+  type ChimpbaseWorkerHandler,
   type ChimpbaseWorkflowContract,
   type ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
@@ -180,19 +180,19 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
     return handler;
   }
 
-  registerQueue<TPayload = unknown, TResult = unknown>(
+  registerWorker<TPayload = unknown, TResult = unknown>(
     name: string,
-    handler: ChimpbaseQueueHandler<TPayload, TResult>,
-    definition?: ChimpbaseQueueDefinition,
-  ): ChimpbaseQueueHandler<TPayload, TResult> {
-    const registration: ChimpbaseQueueRegistration = {
+    handler: ChimpbaseWorkerHandler<TPayload, TResult>,
+    definition?: ChimpbaseWorkerDefinition,
+  ): ChimpbaseWorkerHandler<TPayload, TResult> {
+    const registration: ChimpbaseWorkerRegistration = {
       definition: {
         dlq: definition?.dlq === undefined ? `${name}.dlq` : definition.dlq,
       },
-      handler: handler as ChimpbaseQueueHandler,
+      handler: handler as ChimpbaseWorkerHandler,
       name,
     };
-    this.registry.queues.set(name, registration);
+    this.registry.workers.set(name, registration);
     return handler;
   }
 

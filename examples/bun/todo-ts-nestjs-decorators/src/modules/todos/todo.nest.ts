@@ -1,7 +1,7 @@
 import { Injectable, Module } from "@nestjs/common";
 import {
   Action,
-  Queue,
+  Worker,
   Subscription,
   type ChimpbaseContext,
   type ChimpbaseDlqEnvelope,
@@ -37,7 +37,7 @@ import {
 import {
   captureTodoCompletedDlq,
   notifyTodoCompleted,
-} from "./todo.queues.ts";
+} from "./todo.workers.ts";
 import { seedDemoWorkspace } from "./todo.seed.actions.ts";
 import type {
   CreateTodoInput,
@@ -199,13 +199,13 @@ export class TodoSubscriptionsService {
 }
 
 @Injectable()
-export class TodoQueuesService {
-  @Queue("todo.completed.notify")
+export class TodoWorkersService {
+  @Worker("todo.completed.notify")
   async notifyTodoCompleted(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await notifyTodoCompleted(ctx, todo);
   }
 
-  @Queue("todo.completed.notify.dlq", { dlq: false })
+  @Worker("todo.completed.notify.dlq", { dlq: false })
   async captureTodoCompletedDlq(
     ctx: ChimpbaseContext,
     envelope: ChimpbaseDlqEnvelope<TodoRecord>,
@@ -215,7 +215,7 @@ export class TodoQueuesService {
 }
 
 @Module({
-  exports: [TodoActionsService, TodoSubscriptionsService, TodoQueuesService],
-  providers: [TodoActionsService, TodoSubscriptionsService, TodoQueuesService],
+  exports: [TodoActionsService, TodoSubscriptionsService, TodoWorkersService],
+  providers: [TodoActionsService, TodoSubscriptionsService, TodoWorkersService],
 })
 export class TodoFeatureModule {}

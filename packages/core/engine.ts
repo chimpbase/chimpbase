@@ -8,7 +8,7 @@ import type {
   ChimpbaseDlqEnvelope,
   ChimpbaseKvListOptions,
   ChimpbaseLogger,
-  ChimpbaseQueueSendOptions,
+  ChimpbaseQueueEnqueueOptions,
   ChimpbaseRouteEnv,
   ChimpbaseStreamEvent,
   ChimpbaseStreamReadOptions,
@@ -161,13 +161,13 @@ export interface ChimpbaseEngineAdapter {
   ): Promise<void>;
   createKysely<TDatabase = Record<string, never>>(): Kysely<TDatabase>;
   query<T = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<T[]>;
-  queueSend<TPayload = unknown>(
+  queueEnqueue<TPayload = unknown>(
     name: string,
     payload: TPayload,
-    options?: ChimpbaseQueueSendOptions,
+    options?: ChimpbaseQueueEnqueueOptions,
   ): Promise<void>;
   rollbackTransaction(): Promise<void>;
-  streamPublish<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number>;
+  streamAppend<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number>;
   streamRead<TPayload = unknown>(
     stream: string,
     options?: ChimpbaseStreamReadOptions,
@@ -203,11 +203,11 @@ export class ChimpbaseEngine {
     this.secrets = options.secrets;
     this.worker = options.worker;
 
-    if (this.registry.queues.has(INTERNAL_WORKFLOW_QUEUE_NAME)) {
+    if (this.registry.workers.has(INTERNAL_WORKFLOW_QUEUE_NAME)) {
       throw new Error(`reserved queue name already registered: ${INTERNAL_WORKFLOW_QUEUE_NAME}`);
     }
 
-    this.registry.queues.set(INTERNAL_WORKFLOW_QUEUE_NAME, {
+    this.registry.workers.set(INTERNAL_WORKFLOW_QUEUE_NAME, {
       definition: { dlq: false },
       handler: async (_ctx, payload) => {
         const message = payload as WorkflowQueuePayload;
@@ -251,8 +251,8 @@ export class ChimpbaseEngine {
       return null;
     }
 
-    const queue = this.registry.queues.get(job.queue_name);
-    if (!queue) {
+    const worker = this.registry.workers.get(job.queue_name);
+    if (!worker) {
       await this.failQueueJob(job.id, job.queue_name, `queue handler not found: ${job.queue_name}`, job.attempt_count);
       throw new Error(`queue handler not found: ${job.queue_name}`);
     }
@@ -260,7 +260,7 @@ export class ChimpbaseEngine {
     try {
       const payload = JSON.parse(job.payload_json) as unknown;
       await this.runInTransaction(async () => {
-        await queue.handler(this.createContext({ kind: "queue", name: job.queue_name }), payload);
+        await worker.handler(this.createContext({ kind: "queue", name: job.queue_name }), payload);
       });
 
       const emittedEvents = this.takeCommittedEvents();
@@ -346,19 +346,19 @@ export class ChimpbaseEngine {
           await this.adapter.collectionUpdate(name, filter, patch),
       },
       stream: {
-        publish: async <TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number> =>
-          await this.adapter.streamPublish(stream, event, payload),
+        append: async <TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number> =>
+          await this.adapter.streamAppend(stream, event, payload),
         read: async <TPayload = unknown>(
           stream: string,
           options?: ChimpbaseStreamReadOptions,
         ): Promise<ChimpbaseStreamEvent<TPayload>[]> => await this.adapter.streamRead<TPayload>(stream, options),
       },
       queue: {
-        send: async <TPayload = unknown>(
+        enqueue: async <TPayload = unknown>(
           name: string,
           payload: TPayload,
-          options?: ChimpbaseQueueSendOptions,
-        ) => await this.adapter.queueSend(name, payload, options),
+          options?: ChimpbaseQueueEnqueueOptions,
+        ) => await this.adapter.queueEnqueue(name, payload, options),
       },
       workflow: {
         get: async <TInput = unknown, TState = unknown>(
@@ -489,7 +489,7 @@ export class ChimpbaseEngine {
       ],
     );
 
-    await this.adapter.queueSend(INTERNAL_WORKFLOW_QUEUE_NAME, { workflowId } satisfies WorkflowQueuePayload);
+    await this.adapter.queueEnqueue(INTERNAL_WORKFLOW_QUEUE_NAME, { workflowId } satisfies WorkflowQueuePayload);
 
     return {
       status: "running",
@@ -529,7 +529,7 @@ export class ChimpbaseEngine {
       ],
     );
 
-    await this.adapter.queueSend(INTERNAL_WORKFLOW_QUEUE_NAME, { workflowId } satisfies WorkflowQueuePayload);
+    await this.adapter.queueEnqueue(INTERNAL_WORKFLOW_QUEUE_NAME, { workflowId } satisfies WorkflowQueuePayload);
   }
 
   private async getWorkflowInstance<TInput = unknown, TState = unknown>(
@@ -733,7 +733,7 @@ export class ChimpbaseEngine {
               Date.now() + delayMs,
             ],
           );
-          await this.adapter.queueSend(
+          await this.adapter.queueEnqueue(
             INTERNAL_WORKFLOW_QUEUE_NAME,
             { workflowId } satisfies WorkflowQueuePayload,
             { delayMs },
@@ -821,7 +821,7 @@ export class ChimpbaseEngine {
             [workflowId, step.id, wakeAtMs],
           );
           if (wakeAtMs !== null) {
-            await this.adapter.queueSend(
+            await this.adapter.queueEnqueue(
               INTERNAL_WORKFLOW_QUEUE_NAME,
               { workflowId } satisfies WorkflowQueuePayload,
               { delayMs: Math.max(0, wakeAtMs - Date.now()) },
@@ -997,7 +997,7 @@ export class ChimpbaseEngine {
             Date.now() + directive.delayMs,
           ],
         );
-        await this.adapter.queueSend(
+        await this.adapter.queueEnqueue(
           INTERNAL_WORKFLOW_QUEUE_NAME,
           { workflowId } satisfies WorkflowQueuePayload,
           { delayMs: directive.delayMs },
@@ -1096,7 +1096,7 @@ export class ChimpbaseEngine {
       ],
     );
     if (wakeAtMs !== null) {
-      await this.adapter.queueSend(
+      await this.adapter.queueEnqueue(
         INTERNAL_WORKFLOW_QUEUE_NAME,
         { workflowId } satisfies WorkflowQueuePayload,
         { delayMs: Math.max(0, wakeAtMs - Date.now()) },
@@ -1401,11 +1401,11 @@ export class ChimpbaseEngine {
     errorMessage: string,
     attempts: number,
   ): Promise<void> {
-    const queue = this.registry.queues.get(queueName);
-    const dlqName = queue?.definition.dlq;
+    const worker = this.registry.workers.get(queueName);
+    const dlqName = worker?.definition.dlq;
     const shouldDlq = typeof dlqName === "string" && attempts >= this.worker.maxAttempts;
 
-    if (shouldDlq && queue) {
+    if (shouldDlq && worker) {
       const payloadJson = await this.adapter.getQueueJobPayload(jobId);
       if (payloadJson) {
         const envelope: ChimpbaseDlqEnvelope = {
@@ -1415,7 +1415,7 @@ export class ChimpbaseEngine {
           payload: JSON.parse(payloadJson) as unknown,
           queue: queueName,
         };
-        await this.adapter.queueSend(dlqName, envelope);
+        await this.adapter.queueEnqueue(dlqName, envelope);
       }
     }
 

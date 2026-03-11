@@ -6,7 +6,7 @@ This is the package application code uses to declare:
 
 - `action(...)`
 - `subscription(...)`
-- `queue(...)`
+- `worker(...)`
 - `workflow(...)`
 
 It also exports the public context and durable workflow contracts that hosts consume.
@@ -14,20 +14,20 @@ It also exports the public context and durable workflow contracts that hosts con
 ## Typical usage
 
 ```ts
-import { action, queue, register } from "@chimpbase/runtime";
+import { action, worker, register } from "@chimpbase/runtime";
 
 chimpbase.register(
   action("createCustomer", async (ctx, input) => {
-    await ctx.queue.send("customer.sync", input);
+    await ctx.queue.enqueue("customer.sync", input);
     return { ok: true };
   }),
-  queue("customer.sync", async (ctx, payload) => {
+  worker("customer.sync", async (ctx, payload) => {
     ctx.log.info("syncing customer", payload);
   }),
 );
 ```
 
-## 0.1.1 distribution model
+## 0.1.2 distribution model
 
 `@chimpbase/runtime` is published as TypeScript source for the alpha release.
 

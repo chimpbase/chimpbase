@@ -15,7 +15,7 @@ import type {
   ChimpbaseCollectionFindOptions,
   ChimpbaseCollectionPatch,
   ChimpbaseKvListOptions,
-  ChimpbaseQueueSendOptions,
+  ChimpbaseQueueEnqueueOptions,
   ChimpbaseStreamEvent,
   ChimpbaseStreamReadOptions,
 } from "@chimpbase/runtime";
@@ -424,7 +424,7 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
     async query<T = Record<string, unknown>>(sql: string, params: readonly unknown[] = []): Promise<T[]> {
       return runQuery<T>(db, sql, toSqlBindings(params));
     },
-    async queueSend<TPayload = unknown>(name: string, payload: TPayload, options?: ChimpbaseQueueSendOptions) {
+    async queueEnqueue<TPayload = unknown>(name: string, payload: TPayload, options?: ChimpbaseQueueEnqueueOptions) {
       const availableAtMs = Date.now() + Math.max(0, options?.delayMs ?? 0);
       db.query(
         `
@@ -444,7 +444,7 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
       } catch {
       }
     },
-    async streamPublish<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number> {
+    async streamAppend<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number> {
       db.query(
         `
           INSERT INTO _chimpbase_stream_events (

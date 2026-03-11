@@ -20,7 +20,7 @@ bun add @chimpbase/bun @chimpbase/runtime
 ```ts
 import {
   action,
-  queue,
+  worker,
   subscription,
 } from "@chimpbase/runtime";
 import { createChimpbase } from "@chimpbase/bun";
@@ -42,7 +42,7 @@ chimpbase.register(
       source: "signup",
     });
 
-    await ctx.stream.publish("customers", "customer.created", {
+    await ctx.stream.append("customers", "customer.created", {
       customerId: customer.id,
       email: input.email,
     });
@@ -56,10 +56,10 @@ chimpbase.register(
   }),
 
   subscription("customer.created", async (ctx, event) => {
-    await ctx.queue.send("customer.sync", event);
+    await ctx.queue.enqueue("customer.sync", event);
   }),
 
-  queue("customer.sync", async (ctx, event) => {
+  worker("customer.sync", async (ctx, event) => {
     const apiKey = ctx.secret("CRM_API_KEY");
 
     ctx.log.info("syncing customer", { customerId: event.customerId });
@@ -100,7 +100,7 @@ The mistake is usually adding too many concepts around that.
 
 - `action(...)` for business operations
 - `subscription(...)` for ephemeral internal pub/sub
-- `queue(...)` for background work
+- `worker(...)` for background work
 - `workflow(...)` when a process has to survive time
 
 Everything runs on the same engine and can share the same storage story.
@@ -139,9 +139,9 @@ Use ephemeral pub/sub for internal choreography without turning your codebase in
 
 Publish from an action, react in subscriptions, keep the flow explicit.
 
-### `queue`
+### `queue.enqueue` + `worker`
 
-Use queues for background work, retries and delayed execution.
+Use `queue.enqueue(...)` to dispatch durable jobs and `worker(...)` to process them.
 
 This is the primitive for “do this later” or “do this out of band”.
 
@@ -153,7 +153,7 @@ Use `kv` for tiny pieces of operational state that do not deserve a full table y
 
 Use `collection` when you want schemaless documents for side data, operational metadata or app-owned blobs.
 
-### `stream`
+### `stream.append` + `stream.read`
 
 Use `stream` when you want append/read semantics for timelines, activity feeds or internal event history.
 
@@ -309,7 +309,7 @@ The repo currently ships with:
 
 ## Release model
 
-For `0.1.1`, the published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
+For `0.1.2`, the published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
 
 That means:
 

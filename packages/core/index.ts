@@ -4,10 +4,10 @@ import { pathToFileURL } from "node:url";
 
 import type {
   ChimpbaseActionHandler,
-  ChimpbaseQueueDefinition,
-  ChimpbaseQueueHandler,
   ChimpbaseRouteHandler,
   ChimpbaseSubscriptionHandler,
+  ChimpbaseWorkerDefinition,
+  ChimpbaseWorkerHandler,
   ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
 
@@ -83,9 +83,9 @@ export interface ChimpbaseAppDefinitionInput extends ChimpbaseProjectConfigInput
   projectDir?: string;
 }
 
-export interface ChimpbaseQueueRegistration {
-  definition: Required<ChimpbaseQueueDefinition>;
-  handler: ChimpbaseQueueHandler;
+export interface ChimpbaseWorkerRegistration {
+  definition: Required<ChimpbaseWorkerDefinition>;
+  handler: ChimpbaseWorkerHandler;
   name: string;
 }
 
@@ -93,7 +93,7 @@ export interface ChimpbaseRegistry {
   actions: Map<string, ChimpbaseActionHandler>;
   httpHandler: ChimpbaseRouteHandler | null;
   subscriptions: Map<string, ChimpbaseSubscriptionHandler[]>;
-  queues: Map<string, ChimpbaseQueueRegistration>;
+  workers: Map<string, ChimpbaseWorkerRegistration>;
   workflows: Map<string, Map<number, ChimpbaseWorkflowDefinition>>;
 }
 
@@ -106,11 +106,11 @@ export interface ChimpbaseEntrypointTarget {
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
   ): ChimpbaseSubscriptionHandler<TPayload, TResult>;
-  registerQueue<TPayload = unknown, TResult = unknown>(
+  registerWorker<TPayload = unknown, TResult = unknown>(
     name: string,
-    handler: ChimpbaseQueueHandler<TPayload, TResult>,
-    definition?: ChimpbaseQueueDefinition,
-  ): ChimpbaseQueueHandler<TPayload, TResult>;
+    handler: ChimpbaseWorkerHandler<TPayload, TResult>,
+    definition?: ChimpbaseWorkerDefinition,
+  ): ChimpbaseWorkerHandler<TPayload, TResult>;
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -126,11 +126,11 @@ interface RuntimeGlobals {
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
   ) => ChimpbaseSubscriptionHandler<TPayload, TResult>;
-  defineQueue?: <TPayload = unknown, TResult = unknown>(
+  defineWorker?: <TPayload = unknown, TResult = unknown>(
     name: string,
-    handler: ChimpbaseQueueHandler<TPayload, TResult>,
-    definition?: ChimpbaseQueueDefinition,
-  ) => ChimpbaseQueueHandler<TPayload, TResult>;
+    handler: ChimpbaseWorkerHandler<TPayload, TResult>,
+    definition?: ChimpbaseWorkerDefinition,
+  ) => ChimpbaseWorkerHandler<TPayload, TResult>;
   defineWorkflow?: <TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ) => ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -188,7 +188,7 @@ export function createChimpbaseRegistry(): ChimpbaseRegistry {
     actions: new Map(),
     httpHandler: null,
     subscriptions: new Map(),
-    queues: new Map(),
+    workers: new Map(),
     workflows: new Map(),
   };
 }
@@ -226,7 +226,7 @@ export async function withChimpbaseRegistration<TResult>(
   const globals = globalThis as RuntimeGlobalScope;
   const previousDefineAction = globals.defineAction;
   const previousDefineSubscription = globals.defineSubscription;
-  const previousDefineQueue = globals.defineQueue;
+  const previousDefineWorker = globals.defineWorker;
   const previousDefineWorkflow = globals.defineWorkflow;
 
   globals.defineAction = ((name: string, handler: ChimpbaseActionHandler) => {
@@ -237,9 +237,9 @@ export async function withChimpbaseRegistration<TResult>(
     return target.registerSubscription(eventName, handler);
   }) as RuntimeGlobals["defineSubscription"];
 
-  globals.defineQueue = ((name: string, handler: ChimpbaseQueueHandler, definition?: ChimpbaseQueueDefinition) => {
-    return target.registerQueue(name, handler, definition);
-  }) as RuntimeGlobals["defineQueue"];
+  globals.defineWorker = ((name: string, handler: ChimpbaseWorkerHandler, definition?: ChimpbaseWorkerDefinition) => {
+    return target.registerWorker(name, handler, definition);
+  }) as RuntimeGlobals["defineWorker"];
 
   globals.defineWorkflow = ((definition: ChimpbaseWorkflowDefinition) => {
     return target.registerWorkflow(definition);
@@ -250,7 +250,7 @@ export async function withChimpbaseRegistration<TResult>(
   } finally {
     globals.defineAction = previousDefineAction;
     globals.defineSubscription = previousDefineSubscription;
-    globals.defineQueue = previousDefineQueue;
+    globals.defineWorker = previousDefineWorker;
     globals.defineWorkflow = previousDefineWorkflow;
   }
 }

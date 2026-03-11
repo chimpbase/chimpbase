@@ -72,11 +72,11 @@ export interface ChimpbaseTraceSpan {
   setAttribute(key: string, value: string | number | boolean | null): void;
 }
 
-export interface ChimpbaseQueueSendOptions {
+export interface ChimpbaseQueueEnqueueOptions {
   delayMs?: number;
 }
 
-export interface ChimpbaseQueueDefinition {
+export interface ChimpbaseWorkerDefinition {
   dlq?: false | string;
 }
 
@@ -89,10 +89,10 @@ export interface ChimpbaseDlqEnvelope<TPayload = unknown> {
 }
 
 export interface ChimpbaseQueueClient {
-  send<TPayload = unknown>(
+  enqueue<TPayload = unknown>(
     name: string,
     payload: TPayload,
-    options?: ChimpbaseQueueSendOptions,
+    options?: ChimpbaseQueueEnqueueOptions,
   ): Promise<void>;
 }
 
@@ -361,7 +361,7 @@ export interface ChimpbaseStreamEvent<TPayload = unknown> {
 }
 
 export interface ChimpbaseStreamClient {
-  publish<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number>;
+  append<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number>;
   read<TPayload = unknown>(
     stream: string,
     options?: ChimpbaseStreamReadOptions,
@@ -454,7 +454,7 @@ type ChimpbaseSubscriptionMethod<TThis, TPayload = unknown, TResult = unknown> =
   payload: TPayload,
 ) => TResult | Promise<TResult>;
 
-export type ChimpbaseQueueHandler<
+export type ChimpbaseWorkerHandler<
   TPayload = unknown,
   TResult = unknown,
   TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry,
@@ -463,7 +463,7 @@ export type ChimpbaseQueueHandler<
   payload: TPayload,
 ) => Promise<TResult> | TResult;
 
-type ChimpbaseQueueMethod<TThis, TPayload = unknown, TResult = unknown> = (
+type ChimpbaseWorkerMethod<TThis, TPayload = unknown, TResult = unknown> = (
   this: TThis,
   ctx: ChimpbaseContext<any>,
   payload: TPayload,
@@ -483,11 +483,11 @@ export interface ChimpbaseRegistrationTarget {
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
   ): ChimpbaseSubscriptionHandler<TPayload, TResult>;
-  registerQueue<TPayload = unknown, TResult = unknown>(
+  registerWorker<TPayload = unknown, TResult = unknown>(
     name: string,
-    handler: ChimpbaseQueueHandler<TPayload, TResult>,
-    definition?: ChimpbaseQueueDefinition,
-  ): ChimpbaseQueueHandler<TPayload, TResult>;
+    handler: ChimpbaseWorkerHandler<TPayload, TResult>,
+    definition?: ChimpbaseWorkerDefinition,
+  ): ChimpbaseWorkerHandler<TPayload, TResult>;
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -508,10 +508,10 @@ export interface ChimpbaseSubscriptionRegistration<TPayload = unknown, TResult =
   kind: "subscription";
 }
 
-export interface ChimpbaseQueueRegistration<TPayload = unknown, TResult = unknown> {
-  definition?: ChimpbaseQueueDefinition;
-  handler: ChimpbaseQueueHandler<TPayload, TResult>;
-  kind: "queue";
+export interface ChimpbaseWorkerRegistration<TPayload = unknown, TResult = unknown> {
+  definition?: ChimpbaseWorkerDefinition;
+  handler: ChimpbaseWorkerHandler<TPayload, TResult>;
+  kind: "worker";
   name: string;
 }
 
@@ -551,7 +551,7 @@ export interface ChimpbaseVersionedWorkflow<TInput = unknown, TState = unknown> 
 export type ChimpbaseRegistration =
   | ChimpbaseActionRegistration<any, any>
   | ChimpbaseSubscriptionRegistration<any, any>
-  | ChimpbaseQueueRegistration<any, any>
+  | ChimpbaseWorkerRegistration<any, any>
   | ChimpbaseWorkflowRegistration<any, any>;
 
 type ChimpbaseAnyRegistration = ChimpbaseRegistration;
@@ -574,11 +574,11 @@ type RuntimeGlobals = typeof globalThis & {
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
   ) => ChimpbaseSubscriptionHandler<TPayload, TResult>;
-  defineQueue?: <TPayload = unknown, TResult = unknown>(
+  defineWorker?: <TPayload = unknown, TResult = unknown>(
     name: string,
-    handler: ChimpbaseQueueHandler<TPayload, TResult>,
-    definition?: ChimpbaseQueueDefinition,
-  ) => ChimpbaseQueueHandler<TPayload, TResult>;
+    handler: ChimpbaseWorkerHandler<TPayload, TResult>,
+    definition?: ChimpbaseWorkerDefinition,
+  ) => ChimpbaseWorkerHandler<TPayload, TResult>;
   defineWorkflow?: <TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ) => ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -606,15 +606,15 @@ export function subscription<TPayload = unknown, TResult = unknown>(
   };
 }
 
-export function queue<TPayload = unknown, TResult = unknown>(
+export function worker<TPayload = unknown, TResult = unknown>(
   name: string,
-  handler: ChimpbaseQueueHandler<TPayload, TResult>,
-  definition?: ChimpbaseQueueDefinition,
-): ChimpbaseQueueRegistration<TPayload, TResult> {
+  handler: ChimpbaseWorkerHandler<TPayload, TResult>,
+  definition?: ChimpbaseWorkerDefinition,
+): ChimpbaseWorkerRegistration<TPayload, TResult> {
   return {
     definition,
     handler,
-    kind: "queue",
+    kind: "worker",
     name,
   };
 }
@@ -804,8 +804,8 @@ export function register(
       case "subscription":
         target.registerSubscription(entry.eventName, entry.handler);
         break;
-      case "queue":
-        target.registerQueue(entry.name, entry.handler, entry.definition);
+      case "worker":
+        target.registerWorker(entry.name, entry.handler, entry.definition);
         break;
       case "workflow":
         target.registerWorkflow(entry.definition);
@@ -863,12 +863,12 @@ export function Subscription(eventName: string) {
   };
 }
 
-export function Queue(name: string, definition?: ChimpbaseQueueDefinition) {
+export function Worker(name: string, definition?: ChimpbaseWorkerDefinition) {
   return function (...args: unknown[]): void {
     registerDecoratedMethod(
-      "Queue",
+      "Worker",
       args,
-      (boundValue) => queue(name, boundValue as ChimpbaseQueueHandler<any, any>, definition),
+      (boundValue) => worker(name, boundValue as ChimpbaseWorkerHandler<any, any>, definition),
     );
   };
 }
@@ -897,14 +897,14 @@ export function defineSubscription<TPayload = unknown, TResult = unknown>(
   return handler;
 }
 
-export function defineQueue<TPayload = unknown, TResult = unknown>(
+export function defineWorker<TPayload = unknown, TResult = unknown>(
   name: string,
-  handler: ChimpbaseQueueHandler<TPayload, TResult>,
-  definition?: ChimpbaseQueueDefinition,
-): ChimpbaseQueueHandler<TPayload, TResult> {
-  const runtimeDefineQueue = (globalThis as RuntimeGlobals).defineQueue;
-  if (typeof runtimeDefineQueue === "function") {
-    return runtimeDefineQueue(name, handler, definition);
+  handler: ChimpbaseWorkerHandler<TPayload, TResult>,
+  definition?: ChimpbaseWorkerDefinition,
+): ChimpbaseWorkerHandler<TPayload, TResult> {
+  const runtimeDefineWorker = (globalThis as RuntimeGlobals).defineWorker;
+  if (typeof runtimeDefineWorker === "function") {
+    return runtimeDefineWorker(name, handler, definition);
   }
 
   return handler;
@@ -922,7 +922,7 @@ export function defineWorkflow<TInput = unknown, TState = unknown>(
 }
 
 function registerDecoratedMethod(
-  decoratorName: "Action" | "Queue" | "Subscription",
+  decoratorName: "Action" | "Subscription" | "Worker",
   args: unknown[],
   createEntry: (boundValue: ChimpbaseDecoratorMethod) => ChimpbaseAnyRegistration,
 ): void {

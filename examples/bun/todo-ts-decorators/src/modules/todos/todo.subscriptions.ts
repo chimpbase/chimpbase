@@ -27,7 +27,7 @@ function registerTodoAuditSubscription(eventName: string) {
       ],
     );
 
-    await ctx.stream.publish("todo.activity", eventName, {
+    await ctx.stream.append("todo.activity", eventName, {
       assigneeEmail: todo.assignee_email,
       projectSlug: todo.project_slug,
       status: todo.status,
@@ -46,7 +46,7 @@ const enqueueTodoCompletedNotification = async (
   ctx: ChimpbaseContext,
   todo: TodoRecord,
 ): Promise<void> => {
-  await ctx.queue.send("todo.completed.notify", todo);
+  await ctx.queue.enqueue("todo.completed.notify", todo);
 };
 
 export {

@@ -2,7 +2,7 @@ import { NestFactory } from "@nestjs/core";
 import "reflect-metadata";
 import {
   action,
-  queue,
+  worker,
   subscription,
 } from "@chimpbase/runtime";
 import { createChimpbase } from "@chimpbase/bun";
@@ -15,7 +15,7 @@ import {
 import {
   TodoActionsService,
   TodoSubscriptionsService,
-  TodoQueuesService,
+  TodoWorkersService,
 } from "./src/modules/todos/todo.nest.ts";
 
 export async function createTodoApplication() {
@@ -25,7 +25,7 @@ export async function createTodoApplication() {
   const projectActions = nestApp.get(ProjectActionsService);
   const todoActions = nestApp.get(TodoActionsService);
   const todoSubscriptions = nestApp.get(TodoSubscriptionsService);
-  const todoQueues = nestApp.get(TodoQueuesService);
+  const todoWorkers = nestApp.get(TodoWorkersService);
 
   const chimpbase = await createChimpbase.from(import.meta.dir, {
     httpHandler: todoApiApp,
@@ -53,8 +53,8 @@ export async function createTodoApplication() {
     action("addTodoNote", todoActions.addTodoNote.bind(todoActions)),
     action("listTodoNotes", todoActions.listTodoNotes.bind(todoActions)),
     action("listTodoActivityStream", todoActions.listTodoActivityStream.bind(todoActions)),
-    queue("todo.completed.notify", todoQueues.notifyTodoCompleted.bind(todoQueues)),
-    queue("todo.completed.notify.dlq", todoQueues.captureTodoCompletedDlq.bind(todoQueues), { dlq: false }),
+    worker("todo.completed.notify", todoWorkers.notifyTodoCompleted.bind(todoWorkers)),
+    worker("todo.completed.notify.dlq", todoWorkers.captureTodoCompletedDlq.bind(todoWorkers), { dlq: false }),
     action("seedDemoWorkspace", todoActions.seedDemoWorkspace.bind(todoActions)),
   );
   return {
