@@ -65,7 +65,7 @@
     },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
@@ -84,7 +84,7 @@
     },
     "packages/core": {
       "name": "@chimpbase/core",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@chimpbase/runtime": "workspace:^",
         "kysely": "^0.28.11",
@@ -92,7 +92,7 @@
     },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "kysely": "^0.28.11",
       },

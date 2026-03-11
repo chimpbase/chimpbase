@@ -1,7 +1,7 @@
 import type { ChimpbaseContext } from "@chimpbase/runtime";
 import type { TodoRecord } from "./todo.types.ts";
 
-function registerTodoAuditListener(eventName: string) {
+function registerTodoAuditSubscription(eventName: string) {
   return async (
     ctx: ChimpbaseContext,
     todo: TodoRecord,
@@ -37,10 +37,10 @@ function registerTodoAuditListener(eventName: string) {
   };
 }
 
-const auditTodoCreated = registerTodoAuditListener("todo.created");
-const auditTodoAssigned = registerTodoAuditListener("todo.assigned");
-const auditTodoStarted = registerTodoAuditListener("todo.started");
-const auditTodoCompleted = registerTodoAuditListener("todo.completed");
+const auditTodoCreated = registerTodoAuditSubscription("todo.created");
+const auditTodoAssigned = registerTodoAuditSubscription("todo.assigned");
+const auditTodoStarted = registerTodoAuditSubscription("todo.started");
+const auditTodoCompleted = registerTodoAuditSubscription("todo.completed");
 
 const enqueueTodoCompletedNotification = async (
   ctx: ChimpbaseContext,

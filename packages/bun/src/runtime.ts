@@ -21,12 +21,12 @@ import {
   register as registerEntries,
   registerFrom as registerEntriesFrom,
   type ChimpbaseActionHandler,
-  type ChimpbaseListenerHandler,
   type ChimpbaseRegistration,
   type ChimpbaseQueueDefinition,
   type ChimpbaseQueueHandler,
   type ChimpbaseRouteEnv,
   type ChimpbaseRouteHandler,
+  type ChimpbaseSubscriptionHandler,
   type ChimpbaseWorkflowContract,
   type ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
@@ -170,13 +170,13 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
     return handler;
   }
 
-  registerListener<TPayload = unknown, TResult = unknown>(
+  registerSubscription<TPayload = unknown, TResult = unknown>(
     eventName: string,
-    handler: ChimpbaseListenerHandler<TPayload, TResult>,
-  ): ChimpbaseListenerHandler<TPayload, TResult> {
-    const listeners = this.registry.listeners.get(eventName) ?? [];
-    listeners.push(handler as ChimpbaseListenerHandler);
-    this.registry.listeners.set(eventName, listeners);
+    handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+  ): ChimpbaseSubscriptionHandler<TPayload, TResult> {
+    const subscriptions = this.registry.subscriptions.get(eventName) ?? [];
+    subscriptions.push(handler as ChimpbaseSubscriptionHandler);
+    this.registry.subscriptions.set(eventName, subscriptions);
     return handler;
   }
 

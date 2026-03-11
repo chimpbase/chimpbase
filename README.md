@@ -20,8 +20,8 @@ bun add @chimpbase/bun @chimpbase/runtime
 ```ts
 import {
   action,
-  listener,
   queue,
+  subscription,
 } from "@chimpbase/runtime";
 import { createChimpbase } from "@chimpbase/bun";
 
@@ -47,7 +47,7 @@ chimpbase.register(
       email: input.email,
     });
 
-    await ctx.emit("customer.created", {
+    ctx.pubsub.publish("customer.created", {
       customerId: customer.id,
       email: input.email,
     });
@@ -55,7 +55,7 @@ chimpbase.register(
     return customer;
   }),
 
-  listener("customer.created", async (ctx, event) => {
+  subscription("customer.created", async (ctx, event) => {
     await ctx.queue.send("customer.sync", event);
   }),
 
@@ -99,7 +99,7 @@ The mistake is usually adding too many concepts around that.
 `@chimpbase/bun` keeps the model tighter:
 
 - `action(...)` for business operations
-- `listener(...)` for internal reactions
+- `subscription(...)` for ephemeral internal pub/sub
 - `queue(...)` for background work
 - `workflow(...)` when a process has to survive time
 
@@ -133,11 +133,11 @@ Use raw SQL directly.
 
 If your domain wants a table, join, transaction or `RETURNING`, just write it.
 
-### `emit` + `listener`
+### `pubsub.publish` + `subscription`
 
-Use events for internal choreography without turning your codebase into a message-broker thesis.
+Use ephemeral pub/sub for internal choreography without turning your codebase into a message-broker thesis.
 
-Emit from an action, react in listeners, keep the flow explicit.
+Publish from an action, react in subscriptions, keep the flow explicit.
 
 ### `queue`
 
@@ -213,7 +213,7 @@ It is especially useful when your instinct is:
 
 ## Durable workflows
 
-Workflows exist here for the cases where actions, listeners and queues stop being enough by themselves.
+Workflows exist here for the cases where actions, subscriptions and queues stop being enough by themselves.
 
 Use them when a process needs to:
 
@@ -309,7 +309,7 @@ The repo currently ships with:
 
 ## Release model
 
-For `0.1.0`, the published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
+For `0.1.1`, the published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
 
 That means:
 

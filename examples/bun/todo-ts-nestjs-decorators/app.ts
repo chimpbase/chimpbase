@@ -9,7 +9,7 @@ import {
 } from "./src/modules/projects/project.nest.ts";
 import {
   TodoActionsService,
-  TodoListenersService,
+  TodoSubscriptionsService,
   TodoQueuesService,
 } from "./src/modules/todos/todo.nest.ts";
 
@@ -19,12 +19,12 @@ export async function createTodoApplication() {
   });
   const projectActions = nestApp.get(ProjectActionsService);
   const todoActions = nestApp.get(TodoActionsService);
-  const todoListeners = nestApp.get(TodoListenersService);
+  const todoSubscriptions = nestApp.get(TodoSubscriptionsService);
   const todoQueues = nestApp.get(TodoQueuesService);
 
   const chimpbase = await createChimpbase.from(import.meta.dir, {
     httpHandler: todoApiApp,
-    modules: [projectActions, todoActions, todoListeners, todoQueues],
+    modules: [projectActions, todoActions, todoSubscriptions, todoQueues],
   });
   return {
     chimpbase,

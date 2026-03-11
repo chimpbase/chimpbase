@@ -1,7 +1,7 @@
 import {
   Action,
-  Listener,
   Queue,
+  Subscription,
   type ChimpbaseContext,
   type ChimpbaseDlqEnvelope,
 } from "@chimpbase/runtime";
@@ -25,7 +25,7 @@ import {
   auditTodoCreated,
   auditTodoStarted,
   enqueueTodoCompletedNotification,
-} from "./todo.listeners.ts";
+} from "./todo.subscriptions.ts";
 import {
   addTodoNote,
   listTodoActivityStream,
@@ -117,27 +117,27 @@ export class TodoModule {
     return await listTodoNotifications(ctx);
   }
 
-  @Listener("todo.created")
+  @Subscription("todo.created")
   static async auditTodoCreated(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoCreated(ctx, todo);
   }
 
-  @Listener("todo.assigned")
+  @Subscription("todo.assigned")
   static async auditTodoAssigned(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoAssigned(ctx, todo);
   }
 
-  @Listener("todo.started")
+  @Subscription("todo.started")
   static async auditTodoStarted(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoStarted(ctx, todo);
   }
 
-  @Listener("todo.completed")
+  @Subscription("todo.completed")
   static async auditTodoCompleted(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoCompleted(ctx, todo);
   }
 
-  @Listener("todo.completed")
+  @Subscription("todo.completed")
   static async enqueueTodoCompletedNotification(
     ctx: ChimpbaseContext,
     todo: TodoRecord,

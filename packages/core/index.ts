@@ -4,10 +4,10 @@ import { pathToFileURL } from "node:url";
 
 import type {
   ChimpbaseActionHandler,
-  ChimpbaseListenerHandler,
   ChimpbaseQueueDefinition,
   ChimpbaseQueueHandler,
   ChimpbaseRouteHandler,
+  ChimpbaseSubscriptionHandler,
   ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
 
@@ -92,7 +92,7 @@ export interface ChimpbaseQueueRegistration {
 export interface ChimpbaseRegistry {
   actions: Map<string, ChimpbaseActionHandler>;
   httpHandler: ChimpbaseRouteHandler | null;
-  listeners: Map<string, ChimpbaseListenerHandler[]>;
+  subscriptions: Map<string, ChimpbaseSubscriptionHandler[]>;
   queues: Map<string, ChimpbaseQueueRegistration>;
   workflows: Map<string, Map<number, ChimpbaseWorkflowDefinition>>;
 }
@@ -102,10 +102,10 @@ export interface ChimpbaseEntrypointTarget {
     name: string,
     handler: ChimpbaseActionHandler<TArgs, TResult>,
   ): ChimpbaseActionHandler<TArgs, TResult>;
-  registerListener<TPayload = unknown, TResult = unknown>(
+  registerSubscription<TPayload = unknown, TResult = unknown>(
     eventName: string,
-    handler: ChimpbaseListenerHandler<TPayload, TResult>,
-  ): ChimpbaseListenerHandler<TPayload, TResult>;
+    handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+  ): ChimpbaseSubscriptionHandler<TPayload, TResult>;
   registerQueue<TPayload = unknown, TResult = unknown>(
     name: string,
     handler: ChimpbaseQueueHandler<TPayload, TResult>,
@@ -122,10 +122,10 @@ interface RuntimeGlobals {
     name: string,
     handler: ChimpbaseActionHandler<TArgs, TResult>,
   ) => ChimpbaseActionHandler<TArgs, TResult>;
-  defineListener?: <TPayload = unknown, TResult = unknown>(
+  defineSubscription?: <TPayload = unknown, TResult = unknown>(
     eventName: string,
-    handler: ChimpbaseListenerHandler<TPayload, TResult>,
-  ) => ChimpbaseListenerHandler<TPayload, TResult>;
+    handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+  ) => ChimpbaseSubscriptionHandler<TPayload, TResult>;
   defineQueue?: <TPayload = unknown, TResult = unknown>(
     name: string,
     handler: ChimpbaseQueueHandler<TPayload, TResult>,
@@ -187,7 +187,7 @@ export function createChimpbaseRegistry(): ChimpbaseRegistry {
   return {
     actions: new Map(),
     httpHandler: null,
-    listeners: new Map(),
+    subscriptions: new Map(),
     queues: new Map(),
     workflows: new Map(),
   };
@@ -225,7 +225,7 @@ export async function withChimpbaseRegistration<TResult>(
 ): Promise<TResult> {
   const globals = globalThis as RuntimeGlobalScope;
   const previousDefineAction = globals.defineAction;
-  const previousDefineListener = globals.defineListener;
+  const previousDefineSubscription = globals.defineSubscription;
   const previousDefineQueue = globals.defineQueue;
   const previousDefineWorkflow = globals.defineWorkflow;
 
@@ -233,9 +233,9 @@ export async function withChimpbaseRegistration<TResult>(
     return target.registerAction(name, handler);
   }) as RuntimeGlobals["defineAction"];
 
-  globals.defineListener = ((eventName: string, handler: ChimpbaseListenerHandler) => {
-    return target.registerListener(eventName, handler);
-  }) as RuntimeGlobals["defineListener"];
+  globals.defineSubscription = ((eventName: string, handler: ChimpbaseSubscriptionHandler) => {
+    return target.registerSubscription(eventName, handler);
+  }) as RuntimeGlobals["defineSubscription"];
 
   globals.defineQueue = ((name: string, handler: ChimpbaseQueueHandler, definition?: ChimpbaseQueueDefinition) => {
     return target.registerQueue(name, handler, definition);
@@ -249,7 +249,7 @@ export async function withChimpbaseRegistration<TResult>(
     return await callback();
   } finally {
     globals.defineAction = previousDefineAction;
-    globals.defineListener = previousDefineListener;
+    globals.defineSubscription = previousDefineSubscription;
     globals.defineQueue = previousDefineQueue;
     globals.defineWorkflow = previousDefineWorkflow;
   }

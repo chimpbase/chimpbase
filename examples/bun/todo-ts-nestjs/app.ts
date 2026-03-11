@@ -2,8 +2,8 @@ import { NestFactory } from "@nestjs/core";
 import "reflect-metadata";
 import {
   action,
-  listener,
   queue,
+  subscription,
 } from "@chimpbase/runtime";
 import { createChimpbase } from "@chimpbase/bun";
 
@@ -14,7 +14,7 @@ import {
 } from "./src/modules/projects/project.nest.ts";
 import {
   TodoActionsService,
-  TodoListenersService,
+  TodoSubscriptionsService,
   TodoQueuesService,
 } from "./src/modules/todos/todo.nest.ts";
 
@@ -24,7 +24,7 @@ export async function createTodoApplication() {
   });
   const projectActions = nestApp.get(ProjectActionsService);
   const todoActions = nestApp.get(TodoActionsService);
-  const todoListeners = nestApp.get(TodoListenersService);
+  const todoSubscriptions = nestApp.get(TodoSubscriptionsService);
   const todoQueues = nestApp.get(TodoQueuesService);
 
   const chimpbase = await createChimpbase.from(import.meta.dir, {
@@ -43,11 +43,11 @@ export async function createTodoApplication() {
     action("listTodoAuditLog", todoActions.listTodoAuditLog.bind(todoActions)),
     action("listTodoEvents", todoActions.listTodoEvents.bind(todoActions)),
     action("listTodoNotifications", todoActions.listTodoNotifications.bind(todoActions)),
-    listener("todo.created", todoListeners.auditTodoCreated.bind(todoListeners)),
-    listener("todo.assigned", todoListeners.auditTodoAssigned.bind(todoListeners)),
-    listener("todo.started", todoListeners.auditTodoStarted.bind(todoListeners)),
-    listener("todo.completed", todoListeners.auditTodoCompleted.bind(todoListeners)),
-    listener("todo.completed", todoListeners.enqueueTodoCompletedNotification.bind(todoListeners)),
+    subscription("todo.created", todoSubscriptions.auditTodoCreated.bind(todoSubscriptions)),
+    subscription("todo.assigned", todoSubscriptions.auditTodoAssigned.bind(todoSubscriptions)),
+    subscription("todo.started", todoSubscriptions.auditTodoStarted.bind(todoSubscriptions)),
+    subscription("todo.completed", todoSubscriptions.auditTodoCompleted.bind(todoSubscriptions)),
+    subscription("todo.completed", todoSubscriptions.enqueueTodoCompletedNotification.bind(todoSubscriptions)),
     action("listWorkspacePreferences", todoActions.listWorkspacePreferences.bind(todoActions)),
     action("setWorkspacePreference", todoActions.setWorkspacePreference.bind(todoActions)),
     action("addTodoNote", todoActions.addTodoNote.bind(todoActions)),

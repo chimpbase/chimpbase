@@ -1,8 +1,8 @@
 import { Injectable, Module } from "@nestjs/common";
 import {
   Action,
-  Listener,
   Queue,
+  Subscription,
   type ChimpbaseContext,
   type ChimpbaseDlqEnvelope,
 } from "@chimpbase/runtime";
@@ -26,7 +26,7 @@ import {
   auditTodoCreated,
   auditTodoStarted,
   enqueueTodoCompletedNotification,
-} from "./todo.listeners.ts";
+} from "./todo.subscriptions.ts";
 import {
   addTodoNote,
   listTodoActivityStream,
@@ -168,28 +168,28 @@ export class TodoActionsService {
 }
 
 @Injectable()
-export class TodoListenersService {
-  @Listener("todo.created")
+export class TodoSubscriptionsService {
+  @Subscription("todo.created")
   async auditTodoCreated(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoCreated(ctx, todo);
   }
 
-  @Listener("todo.assigned")
+  @Subscription("todo.assigned")
   async auditTodoAssigned(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoAssigned(ctx, todo);
   }
 
-  @Listener("todo.started")
+  @Subscription("todo.started")
   async auditTodoStarted(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoStarted(ctx, todo);
   }
 
-  @Listener("todo.completed")
+  @Subscription("todo.completed")
   async auditTodoCompleted(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoCompleted(ctx, todo);
   }
 
-  @Listener("todo.completed")
+  @Subscription("todo.completed")
   async enqueueTodoCompletedNotification(
     ctx: ChimpbaseContext,
     todo: TodoRecord,
@@ -215,7 +215,7 @@ export class TodoQueuesService {
 }
 
 @Module({
-  exports: [TodoActionsService, TodoListenersService, TodoQueuesService],
-  providers: [TodoActionsService, TodoListenersService, TodoQueuesService],
+  exports: [TodoActionsService, TodoSubscriptionsService, TodoQueuesService],
+  providers: [TodoActionsService, TodoSubscriptionsService, TodoQueuesService],
 })
 export class TodoFeatureModule {}

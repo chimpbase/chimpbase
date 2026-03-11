@@ -5,7 +5,7 @@ Public runtime DSL for Chimpbase applications.
 This is the package application code uses to declare:
 
 - `action(...)`
-- `listener(...)`
+- `subscription(...)`
 - `queue(...)`
 - `workflow(...)`
 
@@ -27,7 +27,7 @@ chimpbase.register(
 );
 ```
 
-## 0.1.0 distribution model
+## 0.1.1 distribution model
 
 `@chimpbase/runtime` is published as TypeScript source for the alpha release.
 

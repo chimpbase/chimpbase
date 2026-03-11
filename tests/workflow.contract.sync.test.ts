@@ -270,7 +270,7 @@ function createWorkflowIndex(options: {
     "",
     "register({",
     "  registerAction(name, handler) { return globalThis.defineAction(name, handler); },",
-    "  registerListener(name, handler) { return globalThis.defineListener(name, handler); },",
+    "  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },",
     "  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },",
     "  registerWorkflow(definition) { return globalThis.defineWorkflow(definition); },",
     "}, [onboardingWorkflow]);",

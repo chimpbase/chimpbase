@@ -20,7 +20,7 @@ import {
   auditTodoCreated,
   auditTodoStarted,
   enqueueTodoCompletedNotification,
-} from "./todo.listeners.ts";
+} from "./todo.subscriptions.ts";
 import {
   addTodoNote,
   listTodoActivityStream,
@@ -147,7 +147,7 @@ export class TodoActionsService {
 }
 
 @Injectable()
-export class TodoListenersService {
+export class TodoSubscriptionsService {
   async auditTodoCreated(ctx: ChimpbaseContext, todo: TodoRecord): Promise<void> {
     await auditTodoCreated(ctx, todo);
   }
@@ -187,7 +187,7 @@ export class TodoQueuesService {
 }
 
 @Module({
-  exports: [TodoActionsService, TodoListenersService, TodoQueuesService],
-  providers: [TodoActionsService, TodoListenersService, TodoQueuesService],
+  exports: [TodoActionsService, TodoSubscriptionsService, TodoQueuesService],
+  providers: [TodoActionsService, TodoSubscriptionsService, TodoQueuesService],
 })
 export class TodoFeatureModule {}

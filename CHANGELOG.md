@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 - 2026-03-11
+
+Refines the alpha API surface without changing the overall release model.
+
+### Changed
+
+- renamed the ephemeral event API from `emit`/`listener` to `ctx.pubsub.publish(...)` and `subscription(...)`
+- renamed the decorator API from `@Listener(...)` to `@Subscription(...)`
+- updated examples, docs and tests to use the new pub/sub naming consistently
+
 ## 0.1.0 - 2026-03-11
 
 Initial public alpha release of the Chimpbase monorepo.

@@ -1,7 +1,7 @@
 import {
   action,
-  listener,
   queue,
+  subscription,
 } from "@chimpbase/runtime";
 import { createChimpbase } from "@chimpbase/bun";
 
@@ -29,7 +29,7 @@ import {
   auditTodoCreated,
   auditTodoStarted,
   enqueueTodoCompletedNotification,
-} from "./src/modules/todos/todo.listeners.ts";
+} from "./src/modules/todos/todo.subscriptions.ts";
 import {
   addTodoNote,
   listTodoActivityStream,
@@ -67,11 +67,11 @@ export async function createTodoApplication() {
     action("listTodoAuditLog", listTodoAuditLog),
     action("listTodoEvents", listTodoEvents),
     action("listTodoNotifications", listTodoNotifications),
-    listener("todo.created", auditTodoCreated),
-    listener("todo.assigned", auditTodoAssigned),
-    listener("todo.started", auditTodoStarted),
-    listener("todo.completed", auditTodoCompleted),
-    listener("todo.completed", enqueueTodoCompletedNotification),
+    subscription("todo.created", auditTodoCreated),
+    subscription("todo.assigned", auditTodoAssigned),
+    subscription("todo.started", auditTodoStarted),
+    subscription("todo.completed", auditTodoCompleted),
+    subscription("todo.completed", enqueueTodoCompletedNotification),
     action("listWorkspacePreferences", listWorkspacePreferences),
     action("setWorkspacePreference", setWorkspacePreference),
     action("addTodoNote", addTodoNote),

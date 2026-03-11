@@ -35,7 +35,7 @@ const createTodo = async (
   const normalized = normalizeCreateTodoInput(input);
   const project = await requireProjectBySlug(ctx, normalized.projectSlug);
   const todo = await insertTodo(ctx, project.id, normalized);
-  ctx.emit("todo.created", todo);
+  ctx.pubsub.publish("todo.created", todo);
   return todo;
 };
 
@@ -46,7 +46,7 @@ const assignTodo = async (
 ): Promise<TodoRecord> => {
   await requireTodoById(ctx, todoId);
   const todo = await updateTodoAssignee(ctx, todoId, normalizeAssigneeEmail(assigneeEmail));
-  ctx.emit("todo.assigned", todo);
+  ctx.pubsub.publish("todo.assigned", todo);
   return todo;
 };
 
@@ -57,7 +57,7 @@ const startTodo = async (
   const currentTodo = await requireTodoById(ctx, todoId);
   assertStatusTransition(currentTodo.status, "in_progress");
   const todo = await updateTodoStatus(ctx, todoId, "in_progress");
-  ctx.emit("todo.started", todo);
+  ctx.pubsub.publish("todo.started", todo);
   return todo;
 };
 
@@ -68,7 +68,7 @@ const completeTodo = async (
   const currentTodo = await requireTodoById(ctx, todoId);
   assertStatusTransition(currentTodo.status, "done");
   const todo = await updateTodoStatus(ctx, todoId, "done");
-  ctx.emit("todo.completed", todo);
+  ctx.pubsub.publish("todo.completed", todo);
   return todo;
 };
 

@@ -30,7 +30,7 @@ import type {
 import type { ChimpbaseRegistry } from "./index.ts";
 
 export interface ChimpbaseExecutionScope {
-  kind: "action" | "listener" | "queue";
+  kind: "action" | "queue" | "subscription";
   name: string;
 }
 
@@ -220,7 +220,7 @@ export class ChimpbaseEngine {
   async executeAction(name: string, args: unknown[] = []): Promise<ChimpbaseActionExecutionResult> {
     const result = await this.invokeActionByName(name, args);
     const emittedEvents = this.takeCommittedEvents();
-    await this.dispatchListeners(emittedEvents);
+    await this.dispatchSubscriptions(emittedEvents);
     const allEmittedEvents = this.takeCommittedEvents();
 
     return {
@@ -236,7 +236,7 @@ export class ChimpbaseEngine {
       : null;
 
     const emittedEvents = this.takeCommittedEvents();
-    await this.dispatchListeners(emittedEvents);
+    await this.dispatchSubscriptions(emittedEvents);
     const allEmittedEvents = this.takeCommittedEvents();
 
     return {
@@ -264,7 +264,7 @@ export class ChimpbaseEngine {
       });
 
       const emittedEvents = this.takeCommittedEvents();
-      await this.dispatchListeners(emittedEvents);
+      await this.dispatchSubscriptions(emittedEvents);
       const allEmittedEvents = this.takeCommittedEvents();
       const combinedEvents = [...emittedEvents, ...allEmittedEvents];
 
@@ -296,23 +296,29 @@ export class ChimpbaseEngine {
   }
 
   private createContext(scope: ChimpbaseExecutionScope): ChimpbaseContext {
+    const publishEvent = (topic: string, payload: unknown) => {
+      const event = {
+        name: topic,
+        payload,
+        payloadJson: JSON.stringify(payload ?? null),
+      };
+
+      if (this.transactionDepth > 0) {
+        this.pendingEvents.push(event);
+      } else {
+        this.committedEvents.push(event);
+      }
+    };
+
     return {
       db: <TDatabase = Record<string, never>>() =>
         this.adapter.createKysely<TDatabase>(),
       query: <T = Record<string, unknown>>(sql: string, params: readonly unknown[] = []) =>
         this.adapter.query<T>(sql, params),
-      emit: (eventName: string, payload: unknown) => {
-        const event = {
-          name: eventName,
-          payload,
-          payloadJson: JSON.stringify(payload ?? null),
-        };
-
-        if (this.transactionDepth > 0) {
-          this.pendingEvents.push(event);
-        } else {
-          this.committedEvents.push(event);
-        }
+      pubsub: {
+        publish: (topic: string, payload: unknown) => {
+          publishEvent(topic, payload);
+        },
       },
       secret: (name: string) => this.secrets.get(name),
       kv: {
@@ -1347,12 +1353,12 @@ export class ChimpbaseEngine {
     });
   }
 
-  private async dispatchListeners(events: ChimpbaseEventRecord[]): Promise<void> {
+  private async dispatchSubscriptions(events: ChimpbaseEventRecord[]): Promise<void> {
     for (const event of events) {
-      const listeners = this.registry.listeners.get(event.name) ?? [];
-      for (const listener of listeners) {
+      const subscriptions = this.registry.subscriptions.get(event.name) ?? [];
+      for (const subscription of subscriptions) {
         await this.runInTransaction(async () => {
-          await listener(this.createContext({ kind: "listener", name: event.name }), event.payload);
+          await subscription(this.createContext({ kind: "subscription", name: event.name }), event.payload);
         });
       }
     }

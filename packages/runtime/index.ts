@@ -368,6 +368,10 @@ export interface ChimpbaseStreamClient {
   ): Promise<ChimpbaseStreamEvent<TPayload>[]>;
 }
 
+export interface ChimpbasePubSubClient {
+  publish<TPayload = unknown>(topic: string, payload: TPayload): void;
+}
+
 export interface ChimpbaseLogger {
   debug(message: string, attributes?: ChimpbaseTelemetryAttributes): void;
   info(message: string, attributes?: ChimpbaseTelemetryAttributes): void;
@@ -381,7 +385,7 @@ export interface ChimpbaseContext<TActions extends ChimpbaseActionMap = Chimpbas
     sql: string,
     params?: readonly unknown[],
   ): Promise<ChimpbaseQueryResult<T>>;
-  emit<TPayload = unknown>(eventName: string, payload: TPayload): void;
+  pubsub: ChimpbasePubSubClient;
   secret(name: string): string | null;
   kv: ChimpbaseKvClient;
   collection: ChimpbaseCollectionClient;
@@ -435,7 +439,7 @@ type ChimpbaseActionMethod<TThis, TArgs extends unknown[] = unknown[], TResult =
   ...args: TArgs
 ) => TResult | Promise<TResult>;
 
-export type ChimpbaseListenerHandler<
+export type ChimpbaseSubscriptionHandler<
   TPayload = unknown,
   TResult = unknown,
   TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry,
@@ -444,7 +448,7 @@ export type ChimpbaseListenerHandler<
   payload: TPayload,
 ) => Promise<TResult> | TResult;
 
-type ChimpbaseListenerMethod<TThis, TPayload = unknown, TResult = unknown> = (
+type ChimpbaseSubscriptionMethod<TThis, TPayload = unknown, TResult = unknown> = (
   this: TThis,
   ctx: ChimpbaseContext<any>,
   payload: TPayload,
@@ -475,10 +479,10 @@ export interface ChimpbaseRegistrationTarget {
     name: string,
     handler: ChimpbaseActionHandler<TArgs, TResult>,
   ): ChimpbaseActionHandler<TArgs, TResult>;
-  registerListener<TPayload = unknown, TResult = unknown>(
+  registerSubscription<TPayload = unknown, TResult = unknown>(
     eventName: string,
-    handler: ChimpbaseListenerHandler<TPayload, TResult>,
-  ): ChimpbaseListenerHandler<TPayload, TResult>;
+    handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+  ): ChimpbaseSubscriptionHandler<TPayload, TResult>;
   registerQueue<TPayload = unknown, TResult = unknown>(
     name: string,
     handler: ChimpbaseQueueHandler<TPayload, TResult>,
@@ -498,10 +502,10 @@ export interface ChimpbaseActionRegistration<
   name: string;
 }
 
-export interface ChimpbaseListenerRegistration<TPayload = unknown, TResult = unknown> {
+export interface ChimpbaseSubscriptionRegistration<TPayload = unknown, TResult = unknown> {
   eventName: string;
-  handler: ChimpbaseListenerHandler<TPayload, TResult>;
-  kind: "listener";
+  handler: ChimpbaseSubscriptionHandler<TPayload, TResult>;
+  kind: "subscription";
 }
 
 export interface ChimpbaseQueueRegistration<TPayload = unknown, TResult = unknown> {
@@ -546,7 +550,7 @@ export interface ChimpbaseVersionedWorkflow<TInput = unknown, TState = unknown> 
 
 export type ChimpbaseRegistration =
   | ChimpbaseActionRegistration<any, any>
-  | ChimpbaseListenerRegistration<any, any>
+  | ChimpbaseSubscriptionRegistration<any, any>
   | ChimpbaseQueueRegistration<any, any>
   | ChimpbaseWorkflowRegistration<any, any>;
 
@@ -566,10 +570,10 @@ type RuntimeGlobals = typeof globalThis & {
     name: string,
     handler: ChimpbaseActionHandler<TArgs, TResult>,
   ) => ChimpbaseActionHandler<TArgs, TResult>;
-  defineListener?: <TPayload = unknown, TResult = unknown>(
+  defineSubscription?: <TPayload = unknown, TResult = unknown>(
     eventName: string,
-    handler: ChimpbaseListenerHandler<TPayload, TResult>,
-  ) => ChimpbaseListenerHandler<TPayload, TResult>;
+    handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+  ) => ChimpbaseSubscriptionHandler<TPayload, TResult>;
   defineQueue?: <TPayload = unknown, TResult = unknown>(
     name: string,
     handler: ChimpbaseQueueHandler<TPayload, TResult>,
@@ -591,14 +595,14 @@ export function action<TArgs extends unknown[] = unknown[], TResult = unknown>(
   };
 }
 
-export function listener<TPayload = unknown, TResult = unknown>(
+export function subscription<TPayload = unknown, TResult = unknown>(
   eventName: string,
-  handler: ChimpbaseListenerHandler<TPayload, TResult>,
-): ChimpbaseListenerRegistration<TPayload, TResult> {
+  handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+): ChimpbaseSubscriptionRegistration<TPayload, TResult> {
   return {
     eventName,
     handler,
-    kind: "listener",
+    kind: "subscription",
   };
 }
 
@@ -797,8 +801,8 @@ export function register(
       case "action":
         target.registerAction(entry.name, entry.handler);
         break;
-      case "listener":
-        target.registerListener(entry.eventName, entry.handler);
+      case "subscription":
+        target.registerSubscription(entry.eventName, entry.handler);
         break;
       case "queue":
         target.registerQueue(entry.name, entry.handler, entry.definition);
@@ -849,12 +853,12 @@ export function Action(name: string) {
   };
 }
 
-export function Listener(eventName: string) {
+export function Subscription(eventName: string) {
   return function (...args: unknown[]): void {
     registerDecoratedMethod(
-      "Listener",
+      "Subscription",
       args,
-      (boundValue) => listener(eventName, boundValue as ChimpbaseListenerHandler<any, any>),
+      (boundValue) => subscription(eventName, boundValue as ChimpbaseSubscriptionHandler<any, any>),
     );
   };
 }
@@ -881,13 +885,13 @@ export function defineAction<TArgs extends unknown[] = unknown[], TResult = unkn
   return handler;
 }
 
-export function defineListener<TPayload = unknown, TResult = unknown>(
+export function defineSubscription<TPayload = unknown, TResult = unknown>(
   eventName: string,
-  handler: ChimpbaseListenerHandler<TPayload, TResult>,
-): ChimpbaseListenerHandler<TPayload, TResult> {
-  const runtimeDefineListener = (globalThis as RuntimeGlobals).defineListener;
-  if (typeof runtimeDefineListener === "function") {
-    return runtimeDefineListener(eventName, handler);
+  handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+): ChimpbaseSubscriptionHandler<TPayload, TResult> {
+  const runtimeDefineSubscription = (globalThis as RuntimeGlobals).defineSubscription;
+  if (typeof runtimeDefineSubscription === "function") {
+    return runtimeDefineSubscription(eventName, handler);
   }
 
   return handler;
@@ -918,7 +922,7 @@ export function defineWorkflow<TInput = unknown, TState = unknown>(
 }
 
 function registerDecoratedMethod(
-  decoratorName: "Action" | "Listener" | "Queue",
+  decoratorName: "Action" | "Queue" | "Subscription",
   args: unknown[],
   createEntry: (boundValue: ChimpbaseDecoratorMethod) => ChimpbaseAnyRegistration,
 ): void {
