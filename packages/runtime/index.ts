@@ -517,7 +517,12 @@ export interface ChimpbaseRegistrationTarget {
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState>;
+  setTelemetryOverride?(key: string, value: ChimpbaseTelemetryPersistOption): void;
 }
+
+export type ChimpbaseTelemetryPersistOption =
+  | boolean
+  | { log?: boolean; metric?: boolean; trace?: boolean };
 
 export interface ChimpbaseActionRegistration<
   TArgs extends unknown[] = unknown[],
@@ -526,12 +531,14 @@ export interface ChimpbaseActionRegistration<
   kind: "action";
   handler: ChimpbaseActionHandler<TArgs, TResult>;
   name: string;
+  telemetry?: ChimpbaseTelemetryPersistOption;
 }
 
 export interface ChimpbaseSubscriptionRegistration<TPayload = unknown, TResult = unknown> {
   eventName: string;
   handler: ChimpbaseSubscriptionHandler<TPayload, TResult>;
   kind: "subscription";
+  telemetry?: ChimpbaseTelemetryPersistOption;
 }
 
 export interface ChimpbaseWorkerRegistration<TPayload = unknown, TResult = unknown> {
@@ -539,6 +546,7 @@ export interface ChimpbaseWorkerRegistration<TPayload = unknown, TResult = unkno
   handler: ChimpbaseWorkerHandler<TPayload, TResult>;
   kind: "worker";
   name: string;
+  telemetry?: ChimpbaseTelemetryPersistOption;
 }
 
 export interface ChimpbaseCronRegistration<TResult = unknown> {
@@ -546,6 +554,7 @@ export interface ChimpbaseCronRegistration<TResult = unknown> {
   kind: "cron";
   name: string;
   schedule: string;
+  telemetry?: ChimpbaseTelemetryPersistOption;
 }
 
 export interface ChimpbaseWorkflowRegisteredStep {
@@ -626,22 +635,26 @@ type RuntimeGlobals = typeof globalThis & {
 export function action<TArgs extends unknown[] = unknown[], TResult = unknown>(
   name: string,
   handler: ChimpbaseActionHandler<TArgs, TResult>,
+  options?: { telemetry?: ChimpbaseTelemetryPersistOption },
 ): ChimpbaseActionRegistration<TArgs, TResult> {
   return {
     handler,
     kind: "action",
     name,
+    telemetry: options?.telemetry,
   };
 }
 
 export function subscription<TPayload = unknown, TResult = unknown>(
   eventName: string,
   handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+  options?: { telemetry?: ChimpbaseTelemetryPersistOption },
 ): ChimpbaseSubscriptionRegistration<TPayload, TResult> {
   return {
     eventName,
     handler,
     kind: "subscription",
+    telemetry: options?.telemetry,
   };
 }
 
@@ -649,12 +662,14 @@ export function worker<TPayload = unknown, TResult = unknown>(
   name: string,
   handler: ChimpbaseWorkerHandler<TPayload, TResult>,
   definition?: ChimpbaseWorkerDefinition,
+  options?: { telemetry?: ChimpbaseTelemetryPersistOption },
 ): ChimpbaseWorkerRegistration<TPayload, TResult> {
   return {
     definition,
     handler,
     kind: "worker",
     name,
+    telemetry: options?.telemetry,
   };
 }
 
@@ -662,12 +677,14 @@ export function cron<TResult = unknown>(
   name: string,
   schedule: string,
   handler: ChimpbaseCronHandler<TResult>,
+  options?: { telemetry?: ChimpbaseTelemetryPersistOption },
 ): ChimpbaseCronRegistration<TResult> {
   return {
     handler,
     kind: "cron",
     name,
     schedule,
+    telemetry: options?.telemetry,
   };
 }
 
@@ -852,6 +869,9 @@ export function register(
     switch (entry.kind) {
       case "action":
         target.registerAction(entry.name, entry.handler);
+        if (entry.telemetry !== undefined) {
+          target.setTelemetryOverride?.(`action:${entry.name}`, entry.telemetry);
+        }
         break;
       case "cron":
         if (typeof target.registerCron !== "function") {
@@ -859,12 +879,21 @@ export function register(
         }
 
         target.registerCron(entry.name, entry.schedule, entry.handler);
+        if (entry.telemetry !== undefined) {
+          target.setTelemetryOverride?.(`cron:${entry.name}`, entry.telemetry);
+        }
         break;
       case "subscription":
         target.registerSubscription(entry.eventName, entry.handler);
+        if (entry.telemetry !== undefined) {
+          target.setTelemetryOverride?.(`subscription:${entry.eventName}`, entry.telemetry);
+        }
         break;
       case "worker":
         target.registerWorker(entry.name, entry.handler, entry.definition);
+        if (entry.telemetry !== undefined) {
+          target.setTelemetryOverride?.(`queue:${entry.name}`, entry.telemetry);
+        }
         break;
       case "workflow":
         target.registerWorkflow(entry.definition);

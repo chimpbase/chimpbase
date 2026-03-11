@@ -11,8 +11,9 @@ Most application code should use `@chimpbase/runtime` and a host package such as
 - engine execution model
 - host registration contracts
 - action, subscription, worker and workflow orchestration internals
+- telemetry stream persistence (buffer-and-flush after handler execution)
 
-## 0.1.3 distribution model
+## 0.1.4 distribution model
 
 `@chimpbase/core` is published as TypeScript source for the alpha release.
 

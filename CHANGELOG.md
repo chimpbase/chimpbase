@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.4 - 2026-03-11
+
+Adds optional telemetry stream persistence for `ctx.log`, `ctx.metric` and `ctx.trace`.
+
+### Added
+
+- added opt-in telemetry persistence via `telemetry.persist` in `createChimpbase` config
+- telemetry records are buffered during handler execution and batch-appended to dedicated streams (`_chimpbase.logs`, `_chimpbase.metrics`, `_chimpbase.traces`)
+- added `minLevel` filter to skip debug/info logs when persisting (e.g. only persist `warn` and `error`)
+- added per-handler telemetry override via `{ telemetry }` option on `action()`, `worker()`, `subscription()` and `cron()` factories
+- added automatic cleanup cron (`__chimpbase.telemetry.cleanup`) with configurable retention period and schedule
+- added telemetry persistence test coverage
+
 ## 0.1.3 - 2026-03-11
 
 Adds the first durable cron primitive to the alpha runtime surface.

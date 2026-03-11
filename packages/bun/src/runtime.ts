@@ -14,6 +14,7 @@ import {
   type ChimpbaseRegistry,
   type ChimpbaseQueueExecutionResult,
   type ChimpbaseRouteExecutionResult,
+  type ChimpbaseTelemetryPersistOverride,
   type ChimpbaseTelemetryRecord,
   type ChimpbaseWorkerRegistration,
 } from "@chimpbase/core";
@@ -134,12 +135,32 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
       adapter,
       registry,
       secrets,
+      telemetry: {
+        minLevel: options.config.telemetry.minLevel,
+        persist: options.config.telemetry.persist,
+      },
       worker: options.config.worker,
     });
     const host = new ChimpbaseBunHost(projectDir, options.config, storage, engine, registry);
 
     if (options.entrypointPath) {
       await loadChimpbaseEntrypoint(options.entrypointPath, host);
+    }
+
+    if (options.config.telemetry.retention.enabled) {
+      host.registerCron(
+        "__chimpbase.telemetry.cleanup",
+        options.config.telemetry.retention.schedule,
+        async (ctx) => {
+          const cutoffMs = Date.now() - options.config.telemetry.retention.maxAgeDays * 86_400_000;
+          const cutoffTimestamp = new Date(cutoffMs).toISOString();
+          await ctx.query(
+            `DELETE FROM _chimpbase_stream_events WHERE stream_name IN ('_chimpbase.logs', '_chimpbase.metrics', '_chimpbase.traces') AND created_at < ?1`,
+            [cutoffTimestamp],
+          );
+        },
+      );
+      host.setTelemetryOverride("cron:__chimpbase.telemetry.cleanup", false);
     }
 
     return host;
@@ -231,6 +252,10 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
 
   setHttpHandler(handler: ChimpbaseRouteHandler | null): void {
     this.registry.httpHandler = handler;
+  }
+
+  setTelemetryOverride(key: string, value: ChimpbaseTelemetryPersistOverride): void {
+    this.registry.telemetryOverrides.set(key, value);
   }
 
   routeEnv(): ChimpbaseRouteEnv {

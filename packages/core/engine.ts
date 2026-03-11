@@ -29,7 +29,7 @@ import type {
 } from "@chimpbase/runtime";
 
 import { computeNextCronFireTime } from "./cron.ts";
-import type { ChimpbaseRegistry } from "./index.ts";
+import type { ChimpbaseRegistry, ChimpbaseTelemetryPersistOverride } from "./index.ts";
 
 export interface ChimpbaseExecutionScope {
   kind: "action" | "cron" | "queue" | "subscription";
@@ -149,6 +149,11 @@ type WorkflowRunDirective = ChimpbaseWorkflowRunResult<any, any>;
 const INTERNAL_CRON_QUEUE_NAME = "__chimpbase.cron.run";
 const INTERNAL_WORKFLOW_QUEUE_NAME = "__chimpbase.workflow.run";
 
+const TELEMETRY_LOG_STREAM = "_chimpbase.logs";
+const TELEMETRY_METRIC_STREAM = "_chimpbase.metrics";
+const TELEMETRY_TRACE_STREAM = "_chimpbase.traces";
+const LOG_LEVEL_ORDER: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+
 export interface ChimpbaseEngineAdapter {
   advanceCronSchedule(
     scheduleName: string,
@@ -222,6 +227,10 @@ export interface ChimpbaseEngineOptions {
   secrets: {
     get(name: string): string | null;
   };
+  telemetry: {
+    minLevel: "debug" | "info" | "warn" | "error";
+    persist: { log: boolean; metric: boolean; trace: boolean };
+  };
   worker: {
     leaseMs: number;
     maxAttempts: number;
@@ -235,6 +244,7 @@ export class ChimpbaseEngine {
   private readonly pendingEvents: ChimpbaseEventRecord[] = [];
   private readonly registry: ChimpbaseRegistry;
   private readonly secrets: ChimpbaseEngineOptions["secrets"];
+  private readonly telemetryConfig: ChimpbaseEngineOptions["telemetry"];
   private readonly telemetryRecords: ChimpbaseTelemetryRecord[] = [];
   private transactionDepth = 0;
   private readonly worker: ChimpbaseEngineOptions["worker"];
@@ -243,6 +253,7 @@ export class ChimpbaseEngine {
     this.adapter = options.adapter;
     this.registry = options.registry;
     this.secrets = options.secrets;
+    this.telemetryConfig = options.telemetry;
     this.worker = options.worker;
 
     if (this.registry.workers.has(INTERNAL_CRON_QUEUE_NAME)) {
@@ -273,10 +284,12 @@ export class ChimpbaseEngine {
   }
 
   async executeAction(name: string, args: unknown[] = []): Promise<ChimpbaseActionExecutionResult> {
+    const telemetryStart = this.telemetryRecords.length;
     const result = await this.invokeActionByName(name, args);
     const emittedEvents = this.takeCommittedEvents();
     await this.dispatchSubscriptions(emittedEvents);
     const allEmittedEvents = this.takeCommittedEvents();
+    await this.flushTelemetryToStreams({ kind: "action", name }, telemetryStart);
 
     return {
       emittedEvents: [...emittedEvents, ...allEmittedEvents],
@@ -285,6 +298,7 @@ export class ChimpbaseEngine {
   }
 
   async executeRoute(request: Request): Promise<ChimpbaseRouteExecutionResult> {
+    const telemetryStart = this.telemetryRecords.length;
     const routeEnv = this.createRouteEnv();
     const response = this.registry.httpHandler
       ? await this.registry.httpHandler(request, routeEnv)
@@ -293,6 +307,7 @@ export class ChimpbaseEngine {
     const emittedEvents = this.takeCommittedEvents();
     await this.dispatchSubscriptions(emittedEvents);
     const allEmittedEvents = this.takeCommittedEvents();
+    await this.flushTelemetryToStreams(undefined, telemetryStart);
 
     return {
       emittedEvents: [...emittedEvents, ...allEmittedEvents],
@@ -370,6 +385,7 @@ export class ChimpbaseEngine {
   }
 
   async processNextQueueJob(): Promise<ChimpbaseQueueExecutionResult | null> {
+    const telemetryStart = this.telemetryRecords.length;
     const job = await this.adapter.claimNextQueueJob(this.worker.leaseMs);
     if (!job) {
       return null;
@@ -391,6 +407,7 @@ export class ChimpbaseEngine {
       await this.dispatchSubscriptions(emittedEvents);
       const allEmittedEvents = this.takeCommittedEvents();
       const combinedEvents = [...emittedEvents, ...allEmittedEvents];
+      await this.flushTelemetryToStreams({ kind: "queue", name: job.queue_name }, telemetryStart);
 
       await this.adapter.completeQueueJob(job.id);
 
@@ -408,6 +425,76 @@ export class ChimpbaseEngine {
 
   drainTelemetryRecords(): ChimpbaseTelemetryRecord[] {
     return this.telemetryRecords.splice(0);
+  }
+
+  private async flushTelemetryToStreams(scope?: ChimpbaseExecutionScope, fromIndex = 0): Promise<void> {
+    const override = scope
+      ? this.registry.telemetryOverrides.get(`${scope.kind}:${scope.name}`)
+      : undefined;
+
+    const persist = this.resolveTelemetryPersist(override);
+    if (!persist.log && !persist.metric && !persist.trace) {
+      return;
+    }
+
+    const minLevelOrder = LOG_LEVEL_ORDER[this.telemetryConfig.minLevel] ?? 0;
+
+    for (let i = fromIndex; i < this.telemetryRecords.length; i++) {
+      const record = this.telemetryRecords[i];
+      switch (record.kind) {
+        case "log": {
+          if (!persist.log) break;
+          if ((LOG_LEVEL_ORDER[record.level] ?? 0) < minLevelOrder) break;
+          await this.adapter.streamAppend(TELEMETRY_LOG_STREAM, `log.${record.level}`, {
+            attributes: record.attributes,
+            message: record.message,
+            scope: record.scope,
+            timestamp: record.timestamp,
+          });
+          break;
+        }
+        case "metric": {
+          if (!persist.metric) break;
+          await this.adapter.streamAppend(TELEMETRY_METRIC_STREAM, "metric", {
+            labels: record.labels,
+            name: record.name,
+            scope: record.scope,
+            timestamp: record.timestamp,
+            value: record.value,
+          });
+          break;
+        }
+        case "trace": {
+          if (!persist.trace) break;
+          await this.adapter.streamAppend(TELEMETRY_TRACE_STREAM, `trace.${record.phase}`, {
+            attributes: record.attributes,
+            name: record.name,
+            phase: record.phase,
+            scope: record.scope,
+            status: record.status,
+            timestamp: record.timestamp,
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  private resolveTelemetryPersist(
+    override?: ChimpbaseTelemetryPersistOverride,
+  ): { log: boolean; metric: boolean; trace: boolean } {
+    const global = this.telemetryConfig.persist;
+    if (override === undefined) {
+      return global;
+    }
+    if (typeof override === "boolean") {
+      return { log: override, metric: override, trace: override };
+    }
+    return {
+      log: override.log ?? global.log,
+      metric: override.metric ?? global.metric,
+      trace: override.trace ?? global.trace,
+    };
   }
 
   createRouteEnv(): ChimpbaseRouteEnv {

@@ -174,6 +174,8 @@ The runtime can load them from mounted files, environment variables and `.env`, 
 
 These primitives keep observability close to the code that matters, instead of forcing a separate abstraction layer for everything.
 
+Starting in `0.1.4`, telemetry can optionally be persisted into dedicated event streams for debugging and analytics. See the [Telemetry persistence](#telemetry-persistence) section below.
+
 ### `action`
 
 You can call another action from inside the runtime when you want to reuse a business operation without opening another transport path.
@@ -359,9 +361,76 @@ The repo currently ships with:
 - `examples/bun/todo-ts-nestjs`
 - `examples/bun/todo-ts-nestjs-decorators`
 
+## Telemetry persistence
+
+By default, `ctx.log`, `ctx.metric` and `ctx.trace` are collected in memory and available via `drainTelemetryRecords()`. Starting in `0.1.4`, you can optionally persist them into dedicated event streams backed by the same Postgres or SQLite storage.
+
+### Enable globally
+
+```ts
+const chimpbase = await createChimpbase.from(import.meta.dir, {
+  telemetry: {
+    persist: { log: true, metric: true, trace: true },
+  },
+});
+```
+
+When enabled, telemetry records are buffered during handler execution and batch-appended to their respective streams after the handler completes:
+
+| Stream | Event names | Payload |
+|---|---|---|
+| `_chimpbase.logs` | `log.debug`, `log.info`, `log.warn`, `log.error` | `{ message, attributes, scope, timestamp }` |
+| `_chimpbase.metrics` | `metric` | `{ name, value, labels, scope, timestamp }` |
+| `_chimpbase.traces` | `trace.start`, `trace.end` | `{ name, phase, status?, attributes, scope, timestamp }` |
+
+You can read them back with `ctx.stream.read("_chimpbase.logs")` like any other stream.
+
+### Filter by log level
+
+Only persist warnings and errors:
+
+```ts
+telemetry: {
+  persist: { log: true },
+  minLevel: "warn",
+}
+```
+
+### Per-handler override
+
+Override the global setting on individual actions, workers, subscriptions or crons:
+
+```ts
+// Opt a noisy action out of telemetry persistence
+action("healthCheck", handler, { telemetry: false });
+
+// Opt a specific action in when global is off
+action("importantAction", handler, { telemetry: { log: true, metric: true } });
+
+// Only disable trace persistence for one worker
+worker("fastWorker", handler, undefined, { telemetry: { trace: false } });
+```
+
+### Automatic cleanup
+
+Enable retention to automatically delete old telemetry stream events:
+
+```ts
+telemetry: {
+  persist: { log: true, metric: true, trace: true },
+  retention: {
+    enabled: true,
+    maxAgeDays: 14,      // default: 30
+    schedule: "0 3 * * *", // default: "0 2 * * *" (daily at 2am UTC)
+  },
+}
+```
+
+This registers an internal cron (`__chimpbase.telemetry.cleanup`) that runs on the configured schedule and deletes telemetry stream events older than `maxAgeDays`.
+
 ## Distribution
 
-For `0.1.3`, `@chimpbase/bun` is published as TypeScript source instead of a prebuilt `dist/` folder.
+For `0.1.4`, `@chimpbase/bun` is published as TypeScript source instead of a prebuilt `dist/` folder.
 
 That is intentional:
 

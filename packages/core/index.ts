@@ -12,6 +12,10 @@ import type {
   ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
 
+export type ChimpbaseTelemetryPersistOverride =
+  | boolean
+  | { log?: boolean; metric?: boolean; trace?: boolean };
+
 export interface ChimpbaseProjectConfig {
   project: {
     name: string;
@@ -23,6 +27,11 @@ export interface ChimpbaseProjectConfig {
     engine: "memory" | "postgres" | "sqlite";
     path: string | null;
     url: string | null;
+  };
+  telemetry: {
+    minLevel: "debug" | "info" | "warn" | "error";
+    persist: { log: boolean; metric: boolean; trace: boolean };
+    retention: { enabled: boolean; maxAgeDays: number; schedule: string };
   };
   worker: {
     leaseMs: number;
@@ -60,6 +69,11 @@ export interface ChimpbaseProjectConfigInput {
   secrets?: {
     dir?: string | null;
     envFile?: string | null;
+  };
+  telemetry?: {
+    minLevel?: "debug" | "info" | "warn" | "error";
+    persist?: { log?: boolean; metric?: boolean; trace?: boolean };
+    retention?: { enabled?: boolean; maxAgeDays?: number; schedule?: string };
   };
   workflows?: {
     contractsDir?: string | null;
@@ -101,6 +115,7 @@ export interface ChimpbaseRegistry {
   crons: Map<string, ChimpbaseCronRegistration>;
   httpHandler: ChimpbaseRouteHandler | null;
   subscriptions: Map<string, ChimpbaseSubscriptionHandler[]>;
+  telemetryOverrides: Map<string, ChimpbaseTelemetryPersistOverride>;
   workers: Map<string, ChimpbaseWorkerRegistration>;
   workflows: Map<string, Map<number, ChimpbaseWorkflowDefinition>>;
 }
@@ -181,6 +196,19 @@ export function normalizeProjectConfig(
       dir: input.secrets?.dir ?? null,
       envFile: input.secrets?.envFile ?? null,
     },
+    telemetry: {
+      minLevel: input.telemetry?.minLevel ?? "debug",
+      persist: {
+        log: input.telemetry?.persist?.log ?? false,
+        metric: input.telemetry?.persist?.metric ?? false,
+        trace: input.telemetry?.persist?.trace ?? false,
+      },
+      retention: {
+        enabled: input.telemetry?.retention?.enabled ?? false,
+        maxAgeDays: input.telemetry?.retention?.maxAgeDays ?? 30,
+        schedule: input.telemetry?.retention?.schedule ?? "0 2 * * *",
+      },
+    },
     workflows: {
       contractsDir: input.workflows?.contractsDir ?? "workflow-contracts",
     },
@@ -207,6 +235,7 @@ export function createChimpbaseRegistry(): ChimpbaseRegistry {
     crons: new Map(),
     httpHandler: null,
     subscriptions: new Map(),
+    telemetryOverrides: new Map(),
     workers: new Map(),
     workflows: new Map(),
   };
