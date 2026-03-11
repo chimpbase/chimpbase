@@ -88,11 +88,9 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
     });
     await cp(resolve(chimpbaseBunPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/bun/package.json"));
 
-    await cp(
-      resolve(sourceProjectDir, "node_modules", "hono"),
-      resolve(projectDir, "node_modules", "hono"),
-      { recursive: true },
-    );
+    await cp(resolve(workspaceNodeModulesDir, "hono"), resolve(projectDir, "node_modules", "hono"), {
+      recursive: true,
+    });
 
     for (const dependency of bunRuntimeDependencies) {
       await cp(

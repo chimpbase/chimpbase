@@ -21,7 +21,7 @@ if (!dockerAvailable) {
 
     beforeAll(async () => {
       postgres = await startPostgresDocker();
-    });
+    }, 30000);
 
     afterEach(async () => {
       while (cleanupDirs.length > 0) {
@@ -33,8 +33,8 @@ if (!dockerAvailable) {
     });
 
     afterAll(async () => {
-      await postgres.stop();
-    });
+      await postgres?.stop();
+    }, 30000);
 
     test("generates schema snapshot and types from postgres migrations", async () => {
       const projectDir = await createSchemaFixture("generate", [

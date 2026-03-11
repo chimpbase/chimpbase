@@ -6,50 +6,8 @@ import { tmpdir } from "node:os";
 const repoRoot = resolve(import.meta.dir, "../../../../../");
 const sourceProjectDir = resolve(repoRoot, "examples/bun/todo-ts-nestjs-decorators");
 const chimpbaseBunPackageDir = resolve(repoRoot, "packages/bun");
-const workspaceNodeModulesDir = resolve(repoRoot, "node_modules");
 const chimpbaseCorePackageDir = resolve(repoRoot, "packages/core");
 const runtimePackageDir = resolve(repoRoot, "packages/runtime");
-const fixtureNodeModules = [
-  "@borewit",
-  "@lukeed",
-  "@nestjs",
-  "@nuxt",
-  "@tokenizer",
-  "consola",
-  "debug",
-  "fast-safe-stringify",
-  "file-type",
-  "hono",
-  "ieee754",
-  "iterare",
-  "load-esm",
-  "ms",
-  "path-to-regexp",
-  "reflect-metadata",
-  "rxjs",
-  "strtok3",
-  "token-types",
-  "tslib",
-  "uid",
-  "uint8array-extras",
-];
-const bunRuntimeDependencies = [
-  "kysely",
-  "pg",
-  "pg-cloudflare",
-  "pg-connection-string",
-  "pg-pool",
-  "pg-protocol",
-  "pg-types",
-  "pgpass",
-  "split2",
-  "pg-int8",
-  "postgres-array",
-  "postgres-bytea",
-  "postgres-date",
-  "postgres-interval",
-  "xtend",
-];
 
 interface ProjectFixture {
   cleanup(): Promise<void>;
@@ -80,16 +38,27 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
       {
         private: true,
         dependencies: {
-          "@chimpbase/core": "file:./node_modules/@chimpbase/core",
-          "@chimpbase/runtime": "file:./node_modules/@chimpbase/runtime",
-          "@nestjs/common": "file:./node_modules/@nestjs/common",
-          "@nestjs/core": "file:./node_modules/@nestjs/core",
-          "@chimpbase/bun": "file:./node_modules/@chimpbase/bun",
+          "@nestjs/common": "^11.1.5",
+          "@nestjs/core": "^11.1.5",
           hono: "^4.12.5",
           kysely: "^0.28.11",
-          "reflect-metadata": "file:./node_modules/reflect-metadata",
-          rxjs: "file:./node_modules/rxjs",
-          tslib: "file:./node_modules/tslib",
+          pg: "^8.16.3",
+          "pg-cloudflare": "^1.2.7",
+          "pg-connection-string": "^2.9.1",
+          "pg-int8": "^1.0.1",
+          "pg-pool": "^3.10.1",
+          "pg-protocol": "^1.10.3",
+          "pg-types": "^4.1.0",
+          pgpass: "^1.0.5",
+          "postgres-array": "^3.0.4",
+          "postgres-bytea": "^3.0.0",
+          "postgres-date": "^2.1.0",
+          "postgres-interval": "^4.0.2",
+          "reflect-metadata": "^0.2.2",
+          rxjs: "^7.8.2",
+          split2: "^4.2.0",
+          tslib: "^2.8.1",
+          xtend: "^4.0.2",
         },
         scripts: {
           action: "bun run action.ts",
@@ -104,39 +73,19 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
     ),
   );
 
-  try {
-    await mkdir(resolve(projectDir, "node_modules"), { recursive: true });
-    await cp(runtimePackageDir, resolve(projectDir, "node_modules/@chimpbase/runtime"), {
-      recursive: true,
-    });
-    await cp(chimpbaseCorePackageDir, resolve(projectDir, "node_modules/@chimpbase/core"), {
-      recursive: true,
-    });
-    await cp(resolve(sourceProjectDir, "node_modules/@nestjs"), resolve(projectDir, "node_modules/@nestjs"), {
-      recursive: true,
-    });
-    await cp(resolve(chimpbaseBunPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/bun/src"), {
-      recursive: true,
-    });
-    await cp(resolve(chimpbaseBunPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/bun/package.json"));
+  await installFixtureDependencies(projectDir);
 
-    for (const dependency of fixtureNodeModules) {
-      await cp(
-        resolve(sourceProjectDir, "node_modules", dependency),
-        resolve(projectDir, "node_modules", dependency),
-        { recursive: true },
-      );
-    }
-
-    for (const dependency of bunRuntimeDependencies) {
-      await cp(
-        resolve(workspaceNodeModulesDir, dependency),
-        resolve(projectDir, "node_modules", dependency),
-        { recursive: true },
-      );
-    }
-  } catch {
-  }
+  await mkdir(resolve(projectDir, "node_modules/@chimpbase"), { recursive: true });
+  await cp(runtimePackageDir, resolve(projectDir, "node_modules/@chimpbase/runtime"), {
+    recursive: true,
+  });
+  await cp(chimpbaseCorePackageDir, resolve(projectDir, "node_modules/@chimpbase/core"), {
+    recursive: true,
+  });
+  await cp(resolve(chimpbaseBunPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/bun/src"), {
+    recursive: true,
+  });
+  await cp(resolve(chimpbaseBunPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/bun/package.json"));
 
   await mkdir(resolve(projectDir, "data"), { recursive: true });
 
@@ -274,4 +223,22 @@ async function reservePort(): Promise<number> {
       });
     });
   });
+}
+
+async function installFixtureDependencies(projectDir: string): Promise<void> {
+  const process = Bun.spawn(["bun", "install"], {
+    cwd: projectDir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(process.stdout).text(),
+    new Response(process.stderr).text(),
+    process.exited,
+  ]);
+
+  if (exitCode !== 0) {
+    throw new Error(`fixture install failed\n${stdout}\n${stderr}`);
+  }
 }

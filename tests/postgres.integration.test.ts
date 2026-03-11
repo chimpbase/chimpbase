@@ -40,7 +40,7 @@ if (!dockerAvailable) {
 
     beforeAll(async () => {
       postgres = await startPostgresDocker();
-    });
+    }, 30000);
 
     afterEach(async () => {
       while (cleanupFixtures.length > 0) {
@@ -56,8 +56,8 @@ if (!dockerAvailable) {
     });
 
     afterAll(async () => {
-      await postgres.stop();
-    });
+      await postgres?.stop();
+    }, 30000);
 
     test("executes actions, routes, queues and primitives via ChimpbaseBunHost.load", async () => {
       const database = await postgres.createDatabase("runtime");
