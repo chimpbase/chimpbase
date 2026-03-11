@@ -1,0 +1,16 @@
+{
+  "private": true,
+  "dependencies": {
+    "@chimpbase/core": "file:../../packages/core",
+    "@chimpbase/runtime": "file:../../packages/runtime",
+    "chimpbase-bun": "file:../..",
+    "hono": "^4.12.5"
+  },
+  "scripts": {
+    "action": "bun run action.ts",
+    "dev": "bun run app.ts",
+    "test": "bun test",
+    "test:app": "bun test tests/app",
+    "test:e2e": "bun test tests/e2e"
+  }
+}
