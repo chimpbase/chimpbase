@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3 - 2026-03-11
+
+Adds the first durable cron primitive to the alpha runtime surface.
+
+### Added
+
+- added `cron(...)`, `defineCron(...)` and `@Cron(...)` to `@chimpbase/runtime`
+- added durable cron schedule orchestration to the core engine and Bun host
+- added SQLite and Postgres persistence for cron schedules and scheduled runs
+- added runtime and integration coverage proving the next fire time advances before handler retries
+- added cron documentation and a concrete backlog snapshot example in `examples/bun/todo-ts`
+
 ## 0.1.2 - 2026-03-11
 
 Big-bang alpha naming cleanup across the durable primitives.

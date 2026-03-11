@@ -289,6 +289,75 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("schedules durable cron runs on Postgres without stalling after handler failure", async () => {
+      const realDateNow = Date.now;
+      let now = Date.UTC(2026, 2, 11, 12, 1, 0);
+      Date.now = () => now;
+
+      const database = await postgres.createDatabase("cron");
+      const projectDir = await createCronFixture("cron", database.url);
+      const host = await ChimpbaseBunHost.load(projectDir);
+
+      try {
+        await host.syncCronSchedules();
+
+        const initialSchedules = await host.executeAction("listCronSchedules");
+        expect(initialSchedules.result).toEqual([
+          {
+            cron_expression: "*/5 * * * *",
+            next_fire_at_ms: Date.UTC(2026, 2, 11, 12, 5, 0),
+            schedule_name: "billing.rollup",
+          },
+        ]);
+
+        now = Date.UTC(2026, 2, 11, 12, 5, 0);
+        expect((await host.processNextCronSchedule())?.nextFireAtMs).toBe(Date.UTC(2026, 2, 11, 12, 10, 0));
+        expect((await host.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+
+        await host.executeAction("setCronFailure", [true]);
+
+        now = Date.UTC(2026, 2, 11, 12, 10, 0);
+        expect((await host.processNextCronSchedule())?.nextFireAtMs).toBe(Date.UTC(2026, 2, 11, 12, 15, 0));
+        await expect(host.processNextQueueJob()).rejects.toThrow("boom");
+
+        const schedulesAfterFailure = await host.executeAction("listCronSchedules");
+        expect(schedulesAfterFailure.result).toEqual([
+          {
+            cron_expression: "*/5 * * * *",
+            next_fire_at_ms: Date.UTC(2026, 2, 11, 12, 15, 0),
+            schedule_name: "billing.rollup",
+          },
+        ]);
+
+        now = Date.UTC(2026, 2, 11, 12, 15, 0);
+        expect((await host.processNextCronSchedule())?.nextFireAtMs).toBe(Date.UTC(2026, 2, 11, 12, 20, 0));
+
+        await host.executeAction("setCronFailure", [false]);
+
+        expect((await host.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+        expect((await host.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+
+        const audit = await host.executeAction("listCronAudit");
+        expect(audit.result).toEqual([
+          {
+            fire_at_ms: Date.UTC(2026, 2, 11, 12, 5, 0),
+            schedule_name: "billing.rollup",
+          },
+          {
+            fire_at_ms: Date.UTC(2026, 2, 11, 12, 10, 0),
+            schedule_name: "billing.rollup",
+          },
+          {
+            fire_at_ms: Date.UTC(2026, 2, 11, 12, 15, 0),
+            schedule_name: "billing.rollup",
+          },
+        ]);
+      } finally {
+        Date.now = realDateNow;
+        host.close();
+      }
+    }, 30000);
+
     test("boots the todo-ts example against Postgres", async () => {
       const database = await postgres.createDatabase("todo_ts");
       const fixture = await createTodoTsFixture("postgres");
@@ -591,6 +660,111 @@ async function createKyselyFixture(label: string, databaseUrl: string): Promise<
       "[storage]",
       'engine = "postgres"',
       `url = "${databaseUrl}"`,
+      "",
+    ].join("\n"),
+  );
+
+  return dir;
+}
+
+async function createCronFixture(label: string, databaseUrl: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), `chimpbase-postgres-cron-${label}-`));
+  cleanupDirs.push(dir);
+
+  await mkdir(resolve(dir, "node_modules/@chimpbase"), { recursive: true });
+  await cp(resolve(runtimeRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
+    recursive: true,
+  });
+  await cp(resolve(runtimeRoot, "node_modules/kysely"), resolve(dir, "node_modules/kysely"), {
+    recursive: true,
+  });
+  await writeFile(
+    resolve(dir, "package.json"),
+    JSON.stringify(
+      {
+        dependencies: {
+          "@chimpbase/runtime": "file:./packages/runtime",
+          kysely: "^0.28.11",
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  await writeFile(
+    resolve(dir, "tsconfig.json"),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          allowImportingTsExtensions: true,
+          lib: ["ES2022", "DOM"],
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          noEmit: true,
+          skipLibCheck: true,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["index.ts"],
+      },
+      null,
+      2,
+    ),
+  );
+  await mkdir(resolve(dir, "migrations/postgres"), { recursive: true });
+  await writeFile(
+    resolve(dir, "migrations/postgres/001_init.sql"),
+    [
+      "CREATE TABLE cron_audit (",
+      "  id BIGSERIAL PRIMARY KEY,",
+      "  schedule_name TEXT NOT NULL,",
+      "  fire_at_ms BIGINT NOT NULL",
+      ");",
+    ].join("\n"),
+  );
+  await writeFile(
+    resolve(dir, "index.ts"),
+    [
+      'import { action, cron, register } from "@chimpbase/runtime";',
+      "",
+      "register({",
+      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
+      '  registerCron(name, schedule, handler) { return globalThis.defineCron(name, schedule, handler); },',
+      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
+      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
+      "}, [",
+      '  cron("billing.rollup", "*/5 * * * *", async (ctx, invocation) => {',
+      '    const shouldFail = await ctx.kv.get("cron:billing.rollup:fail");',
+      '    if (shouldFail) {',
+      '      throw new Error("boom");',
+      "    }",
+      '    await ctx.query("INSERT INTO cron_audit (schedule_name, fire_at_ms) VALUES (?1, ?2)", [invocation.name, invocation.fireAtMs]);',
+      "  }),",
+      '  action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms::double precision AS fire_at_ms FROM cron_audit ORDER BY fire_at_ms ASC")),',
+      '  action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms::double precision AS next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
+      '  action("setCronFailure", async (ctx, enabled) => {',
+      "    if (enabled) {",
+      '      await ctx.kv.set("cron:billing.rollup:fail", true);',
+      "    } else {",
+      '      await ctx.kv.delete("cron:billing.rollup:fail");',
+      "    }",
+      "    return { enabled };",
+      "  }),",
+      "]);",
+    ].join("\n"),
+  );
+  await writeFile(
+    resolve(dir, "chimpbase.toml"),
+    [
+      "[project]",
+      'name = "postgres-cron-test"',
+      "",
+      "[storage]",
+      'engine = "postgres"',
+      `url = "${databaseUrl}"`,
+      "",
+      "[worker]",
+      "retry_delay_ms = 0",
       "",
     ].join("\n"),
   );

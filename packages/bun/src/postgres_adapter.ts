@@ -27,6 +27,12 @@ interface PersistedCollectionDocument {
   document_json: string;
 }
 
+interface PersistedCronScheduleRow {
+  cron_expression: string;
+  next_fire_at_ms: number;
+  schedule_name: string;
+}
+
 type Queryable = Pool | PoolClient;
 
 export function openPostgresPool(config: ChimpbaseProjectConfig): Pool {
@@ -137,6 +143,38 @@ export async function ensurePostgresInternalTables(pool: Pool): Promise<void> {
 
   await pool.query(
     `
+      CREATE TABLE IF NOT EXISTS _chimpbase_cron_schedules (
+        schedule_name TEXT PRIMARY KEY,
+        cron_expression TEXT NOT NULL,
+        next_fire_at_ms BIGINT NOT NULL,
+        lease_token TEXT,
+        lease_expires_at_ms BIGINT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_cron_schedules_due
+      ON _chimpbase_cron_schedules(next_fire_at_ms, lease_expires_at_ms)
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE TABLE IF NOT EXISTS _chimpbase_cron_runs (
+        schedule_name TEXT NOT NULL,
+        fire_at_ms BIGINT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (schedule_name, fire_at_ms)
+      )
+    `,
+  );
+
+  await pool.query(
+    `
       CREATE TABLE IF NOT EXISTS _chimpbase_workflow_instances (
         workflow_id TEXT PRIMARY KEY,
         workflow_name TEXT NOT NULL,
@@ -199,6 +237,31 @@ export function createPostgresEngineAdapter(pool: Pool): ChimpbaseEngineAdapter 
   const queryable = (): Queryable => transactionClient ?? pool;
 
   return {
+    async advanceCronSchedule(
+      scheduleName: string,
+      fireAtMs: number,
+      nextFireAtMs: number,
+      leaseToken: string,
+    ) {
+      const result = await queryable().query(
+        `
+          UPDATE _chimpbase_cron_schedules
+          SET
+            next_fire_at_ms = $1,
+            lease_token = NULL,
+            lease_expires_at_ms = NULL,
+            updated_at = NOW()
+          WHERE schedule_name = $2
+            AND next_fire_at_ms = $3
+            AND lease_token = $4
+        `,
+        [nextFireAtMs, scheduleName, fireAtMs, leaseToken],
+      );
+
+      if ((result.rowCount ?? 0) === 0) {
+        throw new Error(`cron schedule advance failed: ${scheduleName}`);
+      }
+    },
     async beginTransaction() {
       if (transactionClient) {
         return;
@@ -206,6 +269,42 @@ export function createPostgresEngineAdapter(pool: Pool): ChimpbaseEngineAdapter 
 
       transactionClient = await pool.connect();
       await transactionClient.query("BEGIN");
+    },
+    async claimNextCronSchedule(leaseMs: number): Promise<(PersistedCronScheduleRow & { lease_token: string }) | null> {
+      const now = Date.now();
+      const leaseToken = crypto.randomUUID();
+      const leaseExpiresAtMs = now + leaseMs;
+      const result = await queryable().query<PersistedCronScheduleRow & { lease_token: string }>(
+        `
+          WITH candidate AS (
+            SELECT
+              schedule_name,
+              cron_expression,
+              next_fire_at_ms::double precision AS next_fire_at_ms
+            FROM _chimpbase_cron_schedules
+            WHERE next_fire_at_ms <= $1
+              AND (
+                lease_token IS NULL
+                OR lease_expires_at_ms IS NULL
+                OR lease_expires_at_ms <= $1
+              )
+            ORDER BY next_fire_at_ms ASC, schedule_name ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+          )
+          UPDATE _chimpbase_cron_schedules s
+          SET
+            lease_token = $2,
+            lease_expires_at_ms = $3,
+            updated_at = NOW()
+          FROM candidate
+          WHERE s.schedule_name = candidate.schedule_name
+          RETURNING candidate.schedule_name, candidate.cron_expression, candidate.next_fire_at_ms, s.lease_token
+        `,
+        [now, leaseToken, leaseExpiresAtMs],
+      );
+
+      return result.rows[0] ?? null;
     },
     async claimNextQueueJob(leaseMs: number): Promise<ChimpbaseQueueJobRecord | null> {
       const now = Date.now();
@@ -327,12 +426,32 @@ export function createPostgresEngineAdapter(pool: Pool): ChimpbaseEngineAdapter 
         [jobId],
       );
     },
+    async deleteCronSchedule(scheduleName: string): Promise<void> {
+      await queryable().query(
+        "DELETE FROM _chimpbase_cron_schedules WHERE schedule_name = $1",
+        [scheduleName],
+      );
+    },
     async getQueueJobPayload(jobId: number): Promise<string | null> {
       const result = await queryable().query<{ payload_json: string }>(
         "SELECT payload_json::text AS payload_json FROM _chimpbase_queue_jobs WHERE id = $1 LIMIT 1",
         [jobId],
       );
       return result.rows[0]?.payload_json ?? null;
+    },
+    async insertCronRun(scheduleName: string, fireAtMs: number): Promise<boolean> {
+      const result = await queryable().query(
+        `
+          INSERT INTO _chimpbase_cron_runs (
+            schedule_name,
+            fire_at_ms
+          ) VALUES ($1, $2)
+          ON CONFLICT(schedule_name, fire_at_ms) DO NOTHING
+        `,
+        [scheduleName, fireAtMs],
+      );
+
+      return (result.rowCount ?? 0) > 0;
     },
     async kvDelete(key: string) {
       await queryable().query("DELETE FROM _chimpbase_kv WHERE key = $1", [key]);
@@ -369,6 +488,20 @@ export function createPostgresEngineAdapter(pool: Pool): ChimpbaseEngineAdapter 
         `,
         [key, JSON.stringify(value ?? null)],
       );
+    },
+    async listCronSchedules(): Promise<PersistedCronScheduleRow[]> {
+      const result = await queryable().query<PersistedCronScheduleRow>(
+        `
+          SELECT
+            schedule_name,
+            cron_expression,
+            next_fire_at_ms::double precision AS next_fire_at_ms
+          FROM _chimpbase_cron_schedules
+          ORDER BY schedule_name ASC
+        `,
+      );
+
+      return result.rows;
     },
     async markQueueJobFailure(
       jobId: number,
@@ -423,6 +556,19 @@ export function createPostgresEngineAdapter(pool: Pool): ChimpbaseEngineAdapter 
           ) VALUES ($1, $2::jsonb, 'pending', $3, 0)
         `,
         [name, JSON.stringify(payload ?? null), availableAtMs],
+      );
+    },
+    async releaseCronScheduleLease(scheduleName: string, leaseToken: string): Promise<void> {
+      await queryable().query(
+        `
+          UPDATE _chimpbase_cron_schedules
+          SET
+            lease_token = NULL,
+            lease_expires_at_ms = NULL,
+            updated_at = NOW()
+          WHERE schedule_name = $1 AND lease_token = $2
+        `,
+        [scheduleName, leaseToken],
       );
     },
     async rollbackTransaction() {
@@ -486,6 +632,26 @@ export function createPostgresEngineAdapter(pool: Pool): ChimpbaseEngineAdapter 
         payload: JSON.parse(row.payload_json) as TPayload,
         stream: row.stream_name,
       }));
+    },
+    async upsertCronSchedule(scheduleName: string, cronExpression: string, nextFireAtMs: number): Promise<void> {
+      await queryable().query(
+        `
+          INSERT INTO _chimpbase_cron_schedules (
+            schedule_name,
+            cron_expression,
+            next_fire_at_ms,
+            lease_token,
+            lease_expires_at_ms
+          ) VALUES ($1, $2, $3, NULL, NULL)
+          ON CONFLICT(schedule_name) DO UPDATE SET
+            cron_expression = excluded.cron_expression,
+            next_fire_at_ms = excluded.next_fire_at_ms,
+            lease_token = NULL,
+            lease_expires_at_ms = NULL,
+            updated_at = NOW()
+        `,
+        [scheduleName, cronExpression, nextFireAtMs],
+      );
     },
   };
 }

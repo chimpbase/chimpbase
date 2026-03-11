@@ -27,6 +27,12 @@ interface PersistedCollectionDocument {
   document_json: string;
 }
 
+interface PersistedCronScheduleRow {
+  cron_expression: string;
+  next_fire_at_ms: number;
+  schedule_name: string;
+}
+
 export async function openSqliteDatabase(
   projectDir: string,
   config: ChimpbaseProjectConfig,
@@ -135,6 +141,38 @@ export async function ensureSqliteInternalTables(db: Database): Promise<void> {
 
   db.exec(
     `
+      CREATE TABLE IF NOT EXISTS _chimpbase_cron_schedules (
+        schedule_name TEXT PRIMARY KEY,
+        cron_expression TEXT NOT NULL,
+        next_fire_at_ms INTEGER NOT NULL,
+        lease_token TEXT,
+        lease_expires_at_ms INTEGER,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+  );
+
+  db.exec(
+    `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_cron_schedules_due
+      ON _chimpbase_cron_schedules(next_fire_at_ms, lease_expires_at_ms);
+    `,
+  );
+
+  db.exec(
+    `
+      CREATE TABLE IF NOT EXISTS _chimpbase_cron_runs (
+        schedule_name TEXT NOT NULL,
+        fire_at_ms INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (schedule_name, fire_at_ms)
+      );
+    `,
+  );
+
+  db.exec(
+    `
       CREATE TABLE IF NOT EXISTS _chimpbase_workflow_instances (
         workflow_id TEXT PRIMARY KEY,
         workflow_name TEXT NOT NULL,
@@ -193,8 +231,98 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
   let kysely: Kysely<any> | null = null;
 
   return {
+    async advanceCronSchedule(
+      scheduleName: string,
+      fireAtMs: number,
+      nextFireAtMs: number,
+      leaseToken: string,
+    ) {
+      const result = db.query(
+        `
+          UPDATE _chimpbase_cron_schedules
+          SET
+            next_fire_at_ms = ?1,
+            lease_token = NULL,
+            lease_expires_at_ms = NULL,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE schedule_name = ?2
+            AND next_fire_at_ms = ?3
+            AND lease_token = ?4
+        `,
+      ).run(nextFireAtMs, scheduleName, fireAtMs, leaseToken);
+
+      if (result.changes === 0) {
+        throw new Error(`cron schedule advance failed: ${scheduleName}`);
+      }
+    },
     async beginTransaction() {
       db.exec("BEGIN IMMEDIATE");
+    },
+    async claimNextCronSchedule(leaseMs: number): Promise<(PersistedCronScheduleRow & { lease_token: string }) | null> {
+      const now = Date.now();
+      const leaseToken = crypto.randomUUID();
+      const leaseExpiresAtMs = now + leaseMs;
+
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const [schedule] = db.query(
+          `
+            SELECT
+              schedule_name,
+              cron_expression,
+              next_fire_at_ms
+            FROM _chimpbase_cron_schedules
+            WHERE next_fire_at_ms <= ?1
+              AND (
+                lease_token IS NULL
+                OR lease_expires_at_ms IS NULL
+                OR lease_expires_at_ms <= ?1
+              )
+            ORDER BY next_fire_at_ms ASC, schedule_name ASC
+            LIMIT 1
+          `,
+        ).all(now) as PersistedCronScheduleRow[];
+
+        if (!schedule) {
+          db.exec("COMMIT");
+          return null;
+        }
+
+        const result = db.query(
+          `
+            UPDATE _chimpbase_cron_schedules
+            SET
+              lease_token = ?1,
+              lease_expires_at_ms = ?2,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE schedule_name = ?3
+              AND next_fire_at_ms = ?4
+              AND (
+                lease_token IS NULL
+                OR lease_expires_at_ms IS NULL
+                OR lease_expires_at_ms <= ?5
+              )
+          `,
+        ).run(leaseToken, leaseExpiresAtMs, schedule.schedule_name, schedule.next_fire_at_ms, now);
+
+        if (result.changes === 0) {
+          db.exec("COMMIT");
+          return null;
+        }
+
+        db.exec("COMMIT");
+        return {
+          ...schedule,
+          lease_token: leaseToken,
+        };
+      } catch (error) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+        }
+
+        throw error;
+      }
     },
     async claimNextQueueJob(leaseMs: number): Promise<ChimpbaseQueueJobRecord | null> {
       const now = Date.now();
@@ -334,11 +462,28 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
         `,
       ).run(jobId);
     },
+    async deleteCronSchedule(scheduleName: string): Promise<void> {
+      db.query(
+        "DELETE FROM _chimpbase_cron_schedules WHERE schedule_name = ?1",
+      ).run(scheduleName);
+    },
     async getQueueJobPayload(jobId: number): Promise<string | null> {
       const [job] = db.query(
         "SELECT payload_json FROM _chimpbase_queue_jobs WHERE id = ?1 LIMIT 1",
       ).all(jobId) as Array<{ payload_json: string }>;
       return job?.payload_json ?? null;
+    },
+    async insertCronRun(scheduleName: string, fireAtMs: number): Promise<boolean> {
+      const result = db.query(
+        `
+          INSERT OR IGNORE INTO _chimpbase_cron_runs (
+            schedule_name,
+            fire_at_ms
+          ) VALUES (?1, ?2)
+        `,
+      ).run(scheduleName, fireAtMs);
+
+      return result.changes > 0;
     },
     async kvDelete(key: string) {
       db.query("DELETE FROM _chimpbase_kv WHERE key = ?1").run(key);
@@ -376,6 +521,18 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
             updated_at = CURRENT_TIMESTAMP
         `,
       ).run(key, JSON.stringify(value ?? null));
+    },
+    async listCronSchedules(): Promise<PersistedCronScheduleRow[]> {
+      return db.query(
+        `
+          SELECT
+            schedule_name,
+            cron_expression,
+            next_fire_at_ms
+          FROM _chimpbase_cron_schedules
+          ORDER BY schedule_name ASC
+        `,
+      ).all() as PersistedCronScheduleRow[];
     },
     async markQueueJobFailure(
       jobId: number,
@@ -438,6 +595,18 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
         `,
       ).run(name, JSON.stringify(payload ?? null), availableAtMs);
     },
+    async releaseCronScheduleLease(scheduleName: string, leaseToken: string): Promise<void> {
+      db.query(
+        `
+          UPDATE _chimpbase_cron_schedules
+          SET
+            lease_token = NULL,
+            lease_expires_at_ms = NULL,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE schedule_name = ?1 AND lease_token = ?2
+        `,
+      ).run(scheduleName, leaseToken);
+    },
     async rollbackTransaction() {
       try {
         db.exec("ROLLBACK");
@@ -494,6 +663,25 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
         payload: JSON.parse(row.payload_json) as TPayload,
         stream: row.stream_name,
       }));
+    },
+    async upsertCronSchedule(scheduleName: string, cronExpression: string, nextFireAtMs: number): Promise<void> {
+      db.query(
+        `
+          INSERT INTO _chimpbase_cron_schedules (
+            schedule_name,
+            cron_expression,
+            next_fire_at_ms,
+            lease_token,
+            lease_expires_at_ms
+          ) VALUES (?1, ?2, ?3, NULL, NULL)
+          ON CONFLICT(schedule_name) DO UPDATE SET
+            cron_expression = excluded.cron_expression,
+            next_fire_at_ms = excluded.next_fire_at_ms,
+            lease_token = NULL,
+            lease_expires_at_ms = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        `,
+      ).run(scheduleName, cronExpression, nextFireAtMs);
     },
   };
 }

@@ -553,6 +553,163 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("schedules durable cron runs and advances the next fire before handler retries", async () => {
+    const realDateNow = Date.now;
+    let now = Date.UTC(2026, 2, 11, 10, 2, 0);
+    Date.now = () => now;
+
+    const projectDir = await createInlineFixture("cron", {
+      "index.ts": [
+        'import { action, cron, register } from "@chimpbase/runtime";',
+        "",
+        "register({",
+        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
+        '  registerCron(name, schedule, handler) { return globalThis.defineCron(name, schedule, handler); },',
+        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
+        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
+        "}, [",
+        '  cron("billing.rollup", "*/5 * * * *", async (ctx, invocation) => {',
+        '    const shouldFail = await ctx.kv.get("cron:billing.rollup:fail");',
+        '    if (shouldFail) {',
+        '      throw new Error("boom");',
+        "    }",
+        "    await ctx.query(",
+        '      "INSERT INTO cron_audit (schedule_name, fire_at_ms, fire_at_iso) VALUES (?1, ?2, ?3)",',
+        "      [invocation.name, invocation.fireAtMs, invocation.fireAt],",
+        "    );",
+        "  }),",
+        '  action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms, fire_at_iso FROM cron_audit ORDER BY fire_at_ms ASC")),',
+        '  action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
+        '  action("setCronFailure", async (ctx, enabled) => {',
+        "    if (enabled) {",
+        '      await ctx.kv.set("cron:billing.rollup:fail", true);',
+        "    } else {",
+        '      await ctx.kv.delete("cron:billing.rollup:fail");',
+        "    }",
+        "    return { enabled };",
+        "  }),",
+        "]);",
+      ].join("\n"),
+      "migrations/001_init.sql": [
+        "CREATE TABLE IF NOT EXISTS cron_audit (",
+        "  id INTEGER PRIMARY KEY,",
+        "  schedule_name TEXT NOT NULL,",
+        "  fire_at_ms INTEGER NOT NULL,",
+        "  fire_at_iso TEXT NOT NULL",
+        ");",
+      ].join("\n"),
+    }, [
+      "[project]",
+      'name = "cron-test"',
+      "",
+      "[storage]",
+      'engine = "sqlite"',
+      'path = "data/cron.db"',
+      "",
+      "[worker]",
+      "retry_delay_ms = 0",
+      "",
+    ]);
+
+    const host = await ChimpbaseBunHost.load(projectDir);
+
+    try {
+      await host.syncCronSchedules();
+
+      const initialSchedules = await host.executeAction("listCronSchedules");
+      expect(initialSchedules.result).toEqual([
+        {
+          cron_expression: "*/5 * * * *",
+          next_fire_at_ms: Date.UTC(2026, 2, 11, 10, 5, 0),
+          schedule_name: "billing.rollup",
+        },
+      ]);
+
+      expect(await host.processNextCronSchedule()).toBeNull();
+
+      now = Date.UTC(2026, 2, 11, 10, 5, 0);
+      const firstSchedule = await host.processNextCronSchedule();
+      expect(firstSchedule).toEqual({
+        fireAt: "2026-03-11T10:05:00.000Z",
+        fireAtMs: Date.UTC(2026, 2, 11, 10, 5, 0),
+        nextFireAt: "2026-03-11T10:10:00.000Z",
+        nextFireAtMs: Date.UTC(2026, 2, 11, 10, 10, 0),
+        scheduleName: "billing.rollup",
+      });
+
+      expect((await host.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+
+      const firstAudit = await host.executeAction("listCronAudit");
+      expect(firstAudit.result).toEqual([
+        {
+          fire_at_iso: "2026-03-11T10:05:00.000Z",
+          fire_at_ms: Date.UTC(2026, 2, 11, 10, 5, 0),
+          schedule_name: "billing.rollup",
+        },
+      ]);
+
+      await host.executeAction("setCronFailure", [true]);
+
+      now = Date.UTC(2026, 2, 11, 10, 10, 0);
+      const secondSchedule = await host.processNextCronSchedule();
+      expect(secondSchedule).toEqual({
+        fireAt: "2026-03-11T10:10:00.000Z",
+        fireAtMs: Date.UTC(2026, 2, 11, 10, 10, 0),
+        nextFireAt: "2026-03-11T10:15:00.000Z",
+        nextFireAtMs: Date.UTC(2026, 2, 11, 10, 15, 0),
+        scheduleName: "billing.rollup",
+      });
+
+      await expect(host.processNextQueueJob()).rejects.toThrow("boom");
+
+      const schedulesAfterFailure = await host.executeAction("listCronSchedules");
+      expect(schedulesAfterFailure.result).toEqual([
+        {
+          cron_expression: "*/5 * * * *",
+          next_fire_at_ms: Date.UTC(2026, 2, 11, 10, 15, 0),
+          schedule_name: "billing.rollup",
+        },
+      ]);
+
+      now = Date.UTC(2026, 2, 11, 10, 15, 0);
+      const thirdSchedule = await host.processNextCronSchedule();
+      expect(thirdSchedule).toEqual({
+        fireAt: "2026-03-11T10:15:00.000Z",
+        fireAtMs: Date.UTC(2026, 2, 11, 10, 15, 0),
+        nextFireAt: "2026-03-11T10:20:00.000Z",
+        nextFireAtMs: Date.UTC(2026, 2, 11, 10, 20, 0),
+        scheduleName: "billing.rollup",
+      });
+
+      await host.executeAction("setCronFailure", [false]);
+
+      expect((await host.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+      expect((await host.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+
+      const finalAudit = await host.executeAction("listCronAudit");
+      expect(finalAudit.result).toEqual([
+        {
+          fire_at_iso: "2026-03-11T10:05:00.000Z",
+          fire_at_ms: Date.UTC(2026, 2, 11, 10, 5, 0),
+          schedule_name: "billing.rollup",
+        },
+        {
+          fire_at_iso: "2026-03-11T10:10:00.000Z",
+          fire_at_ms: Date.UTC(2026, 2, 11, 10, 10, 0),
+          schedule_name: "billing.rollup",
+        },
+        {
+          fire_at_iso: "2026-03-11T10:15:00.000Z",
+          fire_at_ms: Date.UTC(2026, 2, 11, 10, 15, 0),
+          schedule_name: "billing.rollup",
+        },
+      ]);
+    } finally {
+      Date.now = realDateNow;
+      host.close();
+    }
+  });
+
   test("routes failed jobs to a custom dlq", async () => {
     const projectDir = await createInlineFixture("dlq", {
       "index.ts": [

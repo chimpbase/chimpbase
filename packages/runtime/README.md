@@ -5,6 +5,7 @@ Public runtime DSL for Chimpbase applications.
 This is the package application code uses to declare:
 
 - `action(...)`
+- `cron(...)`
 - `subscription(...)`
 - `worker(...)`
 - `workflow(...)`
@@ -14,12 +15,18 @@ It also exports the public context and durable workflow contracts that hosts con
 ## Typical usage
 
 ```ts
-import { action, worker, register } from "@chimpbase/runtime";
+import { action, cron, worker, register } from "@chimpbase/runtime";
 
 chimpbase.register(
   action("createCustomer", async (ctx, input) => {
     await ctx.queue.enqueue("customer.sync", input);
     return { ok: true };
+  }),
+  cron("customer.rollup", "0 * * * *", async (ctx, invocation) => {
+    await ctx.collection.insert("customer_rollups", {
+      capturedAt: invocation.fireAt,
+      schedule: invocation.name,
+    });
   }),
   worker("customer.sync", async (ctx, payload) => {
     ctx.log.info("syncing customer", payload);
@@ -27,7 +34,7 @@ chimpbase.register(
 );
 ```
 
-## 0.1.2 distribution model
+## 0.1.3 distribution model
 
 `@chimpbase/runtime` is published as TypeScript source for the alpha release.
 

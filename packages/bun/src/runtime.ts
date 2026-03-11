@@ -9,6 +9,7 @@ import {
   createChimpbaseRegistry,
   loadChimpbaseEntrypoint,
   type ChimpbaseActionExecutionResult,
+  type ChimpbaseCronScheduleExecutionResult,
   type ChimpbaseProjectConfig,
   type ChimpbaseRegistry,
   type ChimpbaseQueueExecutionResult,
@@ -21,6 +22,7 @@ import {
   register as registerEntries,
   registerFrom as registerEntriesFrom,
   type ChimpbaseActionHandler,
+  type ChimpbaseCronHandler,
   type ChimpbaseRegistration,
   type ChimpbaseRouteEnv,
   type ChimpbaseRouteHandler,
@@ -74,6 +76,7 @@ interface SecretStore {
 
 export type TelemetryRecord = ChimpbaseTelemetryRecord;
 export type ActionExecutionResult = ChimpbaseActionExecutionResult;
+export type CronScheduleExecutionResult = ChimpbaseCronScheduleExecutionResult;
 export type QueueExecutionResult = ChimpbaseQueueExecutionResult;
 export type RouteExecutionResult = ChimpbaseRouteExecutionResult;
 
@@ -93,6 +96,8 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
   readonly engine: ChimpbaseEngine;
   readonly projectDir: string;
   readonly registry: ChimpbaseRegistry;
+  private cronRegistryDirty = true;
+  private cronSyncPromise: Promise<void> | null = null;
   private readonly storage: StorageHandle;
 
   private constructor(
@@ -152,6 +157,11 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
     return await this.engine.processNextQueueJob();
   }
 
+  async processNextCronSchedule(): Promise<CronScheduleExecutionResult | null> {
+    await this.syncCronSchedulesIfNeeded();
+    return await this.engine.processNextCronSchedule();
+  }
+
   register(...entriesOrGroups: Array<ChimpbaseRegistration | readonly ChimpbaseRegistration[]>): this {
     registerEntries(this, ...entriesOrGroups);
     return this;
@@ -196,6 +206,20 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
     return handler;
   }
 
+  registerCron<TResult = unknown>(
+    name: string,
+    schedule: string,
+    handler: ChimpbaseCronHandler<TResult>,
+  ): ChimpbaseCronHandler<TResult> {
+    this.registry.crons.set(name, {
+      handler: handler as ChimpbaseCronHandler,
+      name,
+      schedule,
+    });
+    this.cronRegistryDirty = true;
+    return handler;
+  }
+
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState> {
@@ -233,6 +257,11 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
       ...options,
       contractsDir: options.contractsDir ?? this.config.workflows.contractsDir,
     });
+  }
+
+  async syncCronSchedules(): Promise<void> {
+    this.cronRegistryDirty = true;
+    await this.syncCronSchedulesIfNeeded();
   }
 
   serve() {
@@ -286,7 +315,13 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
 
       running = true;
       try {
+        await this.syncCronSchedulesIfNeeded();
         while (!stopped) {
+          const scheduled = await this.processNextCronSchedule();
+          if (scheduled) {
+            continue;
+          }
+
           const job = await this.processNextQueueJob();
           if (!job) {
             break;
@@ -318,6 +353,36 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
 
   close(): void {
     void this.storage.close();
+  }
+
+  private async syncCronSchedulesIfNeeded(): Promise<void> {
+    if (!this.cronRegistryDirty) {
+      return;
+    }
+
+    if (this.cronSyncPromise) {
+      await this.cronSyncPromise;
+      return;
+    }
+
+    this.cronSyncPromise = (async () => {
+      while (this.cronRegistryDirty) {
+        this.cronRegistryDirty = false;
+
+        try {
+          await this.engine.syncRegisteredCrons();
+        } catch (error) {
+          this.cronRegistryDirty = true;
+          throw error;
+        }
+      }
+    })();
+
+    try {
+      await this.cronSyncPromise;
+    } finally {
+      this.cronSyncPromise = null;
+    }
   }
 }
 

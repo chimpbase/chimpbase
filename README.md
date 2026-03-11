@@ -101,6 +101,7 @@ The mistake is usually adding too many concepts around that.
 - `action(...)` for business operations
 - `subscription(...)` for ephemeral internal pub/sub
 - `worker(...)` for background work
+- `cron(...)` for recurring scheduled work
 - `workflow(...)` when a process has to survive time
 
 Everything runs on the same engine and can share the same storage story.
@@ -144,6 +145,12 @@ Publish from an action, react in subscriptions, keep the flow explicit.
 Use `queue.enqueue(...)` to dispatch durable jobs and `worker(...)` to process them.
 
 This is the primitive for “do this later” or “do this out of band”.
+
+### `cron`
+
+Use `cron(...)` for durable recurring schedules such as rollups, reminders and operational snapshots.
+
+In `0.1.3`, cron expressions use the standard 5-field shape in UTC and handlers run through the same worker path as queues.
 
 ### `kv`
 
@@ -210,6 +217,50 @@ This repo is a strong fit when you want to build:
 It is especially useful when your instinct is:
 
 “I want to solve the domain problem, not spend a week wiring glue.”
+
+## Durable cron schedules
+
+Use `cron(...)` when work should happen on a recurring schedule and you want that schedule to live in the same runtime and storage model as the rest of the app.
+
+Simple example:
+
+```ts
+import {
+  action,
+  cron,
+} from "@chimpbase/runtime";
+
+const captureTodoBacklogSnapshot = async (ctx, invocation) => {
+  const [summary] = await ctx.query(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN status = 'backlog' THEN 1 ELSE 0 END) AS backlog,
+      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
+    FROM todo_items
+  `);
+
+  await ctx.collection.insert("todo_backlog_snapshots", {
+    capturedAt: invocation.fireAt,
+    schedule: invocation.name,
+    summary,
+  });
+};
+
+chimpbase.register(
+  cron("todo.backlog.snapshot", "*/15 * * * *", captureTodoBacklogSnapshot),
+  action("listTodoBacklogSnapshots", async (ctx) =>
+    await ctx.collection.find("todo_backlog_snapshots", {}, { limit: 50 }),
+  ),
+);
+```
+
+The important bit is the execution model:
+
+- the schedule is durable
+- the next fire time is advanced before the handler runs
+- the handler itself runs through the worker path, so retries and failure handling stay consistent
+
+For a concrete example in this repo, see `examples/bun/todo-ts/src/modules/todos/todo.cron.ts`.
 
 ## Durable workflows
 
@@ -303,13 +354,14 @@ That gives you versioned snapshots and compatibility checks without introducing 
 The repo currently ships with:
 
 - `examples/bun/todo-ts`
+- `examples/bun/todo-ts` includes a cron example in `src/modules/todos/todo.cron.ts`
 - `examples/bun/todo-ts-decorators`
 - `examples/bun/todo-ts-nestjs`
 - `examples/bun/todo-ts-nestjs-decorators`
 
 ## Release model
 
-For `0.1.2`, the published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
+For `0.1.3`, the published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
 
 That means:
 

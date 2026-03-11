@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import type {
   ChimpbaseActionHandler,
+  ChimpbaseCronHandler,
   ChimpbaseRouteHandler,
   ChimpbaseSubscriptionHandler,
   ChimpbaseWorkerDefinition,
@@ -89,8 +90,15 @@ export interface ChimpbaseWorkerRegistration {
   name: string;
 }
 
+export interface ChimpbaseCronRegistration {
+  handler: ChimpbaseCronHandler;
+  name: string;
+  schedule: string;
+}
+
 export interface ChimpbaseRegistry {
   actions: Map<string, ChimpbaseActionHandler>;
+  crons: Map<string, ChimpbaseCronRegistration>;
   httpHandler: ChimpbaseRouteHandler | null;
   subscriptions: Map<string, ChimpbaseSubscriptionHandler[]>;
   workers: Map<string, ChimpbaseWorkerRegistration>;
@@ -111,6 +119,11 @@ export interface ChimpbaseEntrypointTarget {
     handler: ChimpbaseWorkerHandler<TPayload, TResult>,
     definition?: ChimpbaseWorkerDefinition,
   ): ChimpbaseWorkerHandler<TPayload, TResult>;
+  registerCron<TResult = unknown>(
+    name: string,
+    schedule: string,
+    handler: ChimpbaseCronHandler<TResult>,
+  ): ChimpbaseCronHandler<TResult>;
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -131,6 +144,11 @@ interface RuntimeGlobals {
     handler: ChimpbaseWorkerHandler<TPayload, TResult>,
     definition?: ChimpbaseWorkerDefinition,
   ) => ChimpbaseWorkerHandler<TPayload, TResult>;
+  defineCron?: <TResult = unknown>(
+    name: string,
+    schedule: string,
+    handler: ChimpbaseCronHandler<TResult>,
+  ) => ChimpbaseCronHandler<TResult>;
   defineWorkflow?: <TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ) => ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -186,6 +204,7 @@ export function defineChimpbaseApp(
 export function createChimpbaseRegistry(): ChimpbaseRegistry {
   return {
     actions: new Map(),
+    crons: new Map(),
     httpHandler: null,
     subscriptions: new Map(),
     workers: new Map(),
@@ -225,6 +244,7 @@ export async function withChimpbaseRegistration<TResult>(
 ): Promise<TResult> {
   const globals = globalThis as RuntimeGlobalScope;
   const previousDefineAction = globals.defineAction;
+  const previousDefineCron = globals.defineCron;
   const previousDefineSubscription = globals.defineSubscription;
   const previousDefineWorker = globals.defineWorker;
   const previousDefineWorkflow = globals.defineWorkflow;
@@ -241,6 +261,10 @@ export async function withChimpbaseRegistration<TResult>(
     return target.registerWorker(name, handler, definition);
   }) as RuntimeGlobals["defineWorker"];
 
+  globals.defineCron = ((name: string, schedule: string, handler: ChimpbaseCronHandler) => {
+    return target.registerCron(name, schedule, handler);
+  }) as RuntimeGlobals["defineCron"];
+
   globals.defineWorkflow = ((definition: ChimpbaseWorkflowDefinition) => {
     return target.registerWorkflow(definition);
   }) as RuntimeGlobals["defineWorkflow"];
@@ -249,6 +273,7 @@ export async function withChimpbaseRegistration<TResult>(
     return await callback();
   } finally {
     globals.defineAction = previousDefineAction;
+    globals.defineCron = previousDefineCron;
     globals.defineSubscription = previousDefineSubscription;
     globals.defineWorker = previousDefineWorker;
     globals.defineWorkflow = previousDefineWorkflow;
@@ -328,6 +353,7 @@ async function fileExists(path: string): Promise<boolean> {
 export {
   ChimpbaseEngine,
   type ChimpbaseActionExecutionResult,
+  type ChimpbaseCronScheduleExecutionResult,
   type ChimpbaseEngineAdapter,
   type ChimpbaseEngineOptions,
   type ChimpbaseEventRecord,

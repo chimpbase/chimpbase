@@ -5,6 +5,7 @@ import type {
   ChimpbaseCollectionFindOptions,
   ChimpbaseCollectionPatch,
   ChimpbaseContext,
+  ChimpbaseCronInvocation,
   ChimpbaseDlqEnvelope,
   ChimpbaseKvListOptions,
   ChimpbaseLogger,
@@ -27,10 +28,11 @@ import type {
   ChimpbaseWorkflowStepDefinition,
 } from "@chimpbase/runtime";
 
+import { computeNextCronFireTime } from "./cron.ts";
 import type { ChimpbaseRegistry } from "./index.ts";
 
 export interface ChimpbaseExecutionScope {
-  kind: "action" | "queue" | "subscription";
+  kind: "action" | "cron" | "queue" | "subscription";
   name: string;
 }
 
@@ -90,6 +92,14 @@ export interface ChimpbaseRouteExecutionResult {
   response: Response | null;
 }
 
+export interface ChimpbaseCronScheduleExecutionResult {
+  fireAt: string;
+  fireAtMs: number;
+  nextFireAt: string;
+  nextFireAtMs: number;
+  scheduleName: string;
+}
+
 type ChimpbaseWorkflowStatus =
   | "completed"
   | "failed"
@@ -115,16 +125,39 @@ interface PersistedWorkflowSignalRow {
   payload_json: string;
 }
 
+interface PersistedCronScheduleRow {
+  cron_expression: string;
+  next_fire_at_ms: number;
+  schedule_name: string;
+}
+
+interface ClaimedCronScheduleRow extends PersistedCronScheduleRow {
+  lease_token: string;
+}
+
 interface WorkflowQueuePayload {
   workflowId: string;
 }
 
+interface CronQueuePayload {
+  fireAtMs: number;
+  scheduleName: string;
+}
+
 type WorkflowRunDirective = ChimpbaseWorkflowRunResult<any, any>;
 
+const INTERNAL_CRON_QUEUE_NAME = "__chimpbase.cron.run";
 const INTERNAL_WORKFLOW_QUEUE_NAME = "__chimpbase.workflow.run";
 
 export interface ChimpbaseEngineAdapter {
+  advanceCronSchedule(
+    scheduleName: string,
+    fireAtMs: number,
+    nextFireAtMs: number,
+    leaseToken: string,
+  ): Promise<void>;
   beginTransaction(): Promise<void>;
+  claimNextCronSchedule(leaseMs: number): Promise<ClaimedCronScheduleRow | null>;
   claimNextQueueJob(leaseMs: number): Promise<ChimpbaseQueueJobRecord | null>;
   collectionDelete(name: string, filter?: ChimpbaseCollectionFilter): Promise<number>;
   collectionFind<TDocument = Record<string, unknown>>(
@@ -148,11 +181,14 @@ export interface ChimpbaseEngineAdapter {
   ): Promise<number>;
   commitTransaction(events: ChimpbaseEventRecord[]): Promise<void>;
   completeQueueJob(jobId: number): Promise<void>;
+  deleteCronSchedule(scheduleName: string): Promise<void>;
   getQueueJobPayload(jobId: number): Promise<string | null>;
+  insertCronRun(scheduleName: string, fireAtMs: number): Promise<boolean>;
   kvDelete(key: string): Promise<void>;
   kvGet<TValue = unknown>(key: string): Promise<TValue | null>;
   kvList(options?: ChimpbaseKvListOptions): Promise<string[]>;
   kvSet<TValue = unknown>(key: string, value: TValue): Promise<void>;
+  listCronSchedules(): Promise<PersistedCronScheduleRow[]>;
   markQueueJobFailure(
     jobId: number,
     status: "dlq" | "failed" | "pending",
@@ -166,12 +202,18 @@ export interface ChimpbaseEngineAdapter {
     payload: TPayload,
     options?: ChimpbaseQueueEnqueueOptions,
   ): Promise<void>;
+  releaseCronScheduleLease(scheduleName: string, leaseToken: string): Promise<void>;
   rollbackTransaction(): Promise<void>;
   streamAppend<TPayload = unknown>(stream: string, event: string, payload: TPayload): Promise<number>;
   streamRead<TPayload = unknown>(
     stream: string,
     options?: ChimpbaseStreamReadOptions,
   ): Promise<ChimpbaseStreamEvent<TPayload>[]>;
+  upsertCronSchedule(
+    scheduleName: string,
+    cronExpression: string,
+    nextFireAtMs: number,
+  ): Promise<void>;
 }
 
 export interface ChimpbaseEngineOptions {
@@ -202,6 +244,19 @@ export class ChimpbaseEngine {
     this.registry = options.registry;
     this.secrets = options.secrets;
     this.worker = options.worker;
+
+    if (this.registry.workers.has(INTERNAL_CRON_QUEUE_NAME)) {
+      throw new Error(`reserved queue name already registered: ${INTERNAL_CRON_QUEUE_NAME}`);
+    }
+
+    this.registry.workers.set(INTERNAL_CRON_QUEUE_NAME, {
+      definition: { dlq: false },
+      handler: async (_ctx, payload) => {
+        const message = payload as CronQueuePayload;
+        await this.processCronQueuePayload(message);
+      },
+      name: INTERNAL_CRON_QUEUE_NAME,
+    });
 
     if (this.registry.workers.has(INTERNAL_WORKFLOW_QUEUE_NAME)) {
       throw new Error(`reserved queue name already registered: ${INTERNAL_WORKFLOW_QUEUE_NAME}`);
@@ -243,6 +298,75 @@ export class ChimpbaseEngine {
       emittedEvents: [...emittedEvents, ...allEmittedEvents],
       response,
     };
+  }
+
+  async processNextCronSchedule(): Promise<ChimpbaseCronScheduleExecutionResult | null> {
+    const claimed = await this.adapter.claimNextCronSchedule(this.worker.leaseMs);
+    if (!claimed) {
+      return null;
+    }
+
+    const registration = this.registry.crons.get(claimed.schedule_name);
+    if (!registration) {
+      await this.adapter.releaseCronScheduleLease(claimed.schedule_name, claimed.lease_token);
+      await this.adapter.deleteCronSchedule(claimed.schedule_name);
+      return null;
+    }
+
+    const fireAtMs = claimed.next_fire_at_ms;
+    let nextFireAtMs: number;
+
+    try {
+      nextFireAtMs = computeNextCronFireTime(registration.schedule, fireAtMs);
+      await this.runInTransaction(async () => {
+        const inserted = await this.adapter.insertCronRun(claimed.schedule_name, fireAtMs);
+        if (inserted) {
+          await this.adapter.queueEnqueue(INTERNAL_CRON_QUEUE_NAME, {
+            fireAtMs,
+            scheduleName: claimed.schedule_name,
+          } satisfies CronQueuePayload);
+        }
+
+        await this.adapter.advanceCronSchedule(
+          claimed.schedule_name,
+          fireAtMs,
+          nextFireAtMs,
+          claimed.lease_token,
+        );
+      });
+    } catch (error) {
+      await this.adapter.releaseCronScheduleLease(claimed.schedule_name, claimed.lease_token);
+      throw error;
+    }
+
+    return {
+      fireAt: new Date(fireAtMs).toISOString(),
+      fireAtMs,
+      nextFireAt: new Date(nextFireAtMs).toISOString(),
+      nextFireAtMs,
+      scheduleName: claimed.schedule_name,
+    };
+  }
+
+  async syncRegisteredCrons(): Promise<void> {
+    const persisted = await this.adapter.listCronSchedules();
+    const persistedByName = new Map(persisted.map((row) => [row.schedule_name, row]));
+
+    for (const [name, registration] of this.registry.crons) {
+      const existing = persistedByName.get(name);
+      if (existing && existing.cron_expression === registration.schedule) {
+        persistedByName.delete(name);
+        continue;
+      }
+
+      const nextFireAtMs = computeNextCronFireTime(registration.schedule, Date.now());
+      await this.adapter.upsertCronSchedule(name, registration.schedule, nextFireAtMs);
+      persistedByName.delete(name);
+    }
+
+    for (const staleName of persistedByName.keys()) {
+      await this.adapter.deleteCronSchedule(staleName);
+    }
   }
 
   async processNextQueueJob(): Promise<ChimpbaseQueueExecutionResult | null> {
@@ -293,6 +417,34 @@ export class ChimpbaseEngine {
         ...args: TArgs
       ): Promise<TResult> => await this.invokeActionByName<TResult>(name, args),
     };
+  }
+
+  private async processCronQueuePayload(payload: CronQueuePayload): Promise<void> {
+    if (
+      !payload
+      || typeof payload.scheduleName !== "string"
+      || payload.scheduleName.length === 0
+      || !Number.isFinite(payload.fireAtMs)
+    ) {
+      throw new Error("cron queue payload requires scheduleName and fireAtMs");
+    }
+
+    const registration = this.registry.crons.get(payload.scheduleName);
+    if (!registration) {
+      throw new Error(`cron handler not found: ${payload.scheduleName}`);
+    }
+
+    const invocation: ChimpbaseCronInvocation = {
+      fireAt: new Date(payload.fireAtMs).toISOString(),
+      fireAtMs: payload.fireAtMs,
+      name: payload.scheduleName,
+      schedule: registration.schedule,
+    };
+
+    await registration.handler(
+      this.createContext({ kind: "cron", name: payload.scheduleName }),
+      invocation,
+    );
   }
 
   private createContext(scope: ChimpbaseExecutionScope): ChimpbaseContext {

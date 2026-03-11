@@ -80,6 +80,13 @@ export interface ChimpbaseWorkerDefinition {
   dlq?: false | string;
 }
 
+export interface ChimpbaseCronInvocation {
+  fireAt: string;
+  fireAtMs: number;
+  name: string;
+  schedule: string;
+}
+
 export interface ChimpbaseDlqEnvelope<TPayload = unknown> {
   attempts: number;
   error: string;
@@ -469,6 +476,20 @@ type ChimpbaseWorkerMethod<TThis, TPayload = unknown, TResult = unknown> = (
   payload: TPayload,
 ) => TResult | Promise<TResult>;
 
+export type ChimpbaseCronHandler<
+  TResult = unknown,
+  TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry,
+> = (
+  ctx: ChimpbaseContext<TActions>,
+  invocation: ChimpbaseCronInvocation,
+) => Promise<TResult> | TResult;
+
+type ChimpbaseCronMethod<TThis, TResult = unknown> = (
+  this: TThis,
+  ctx: ChimpbaseContext<any>,
+  invocation: ChimpbaseCronInvocation,
+) => TResult | Promise<TResult>;
+
 export type ChimpbaseRouteHandler<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry> = (
   request: Request,
   env: ChimpbaseRouteEnv<TActions>,
@@ -488,6 +509,11 @@ export interface ChimpbaseRegistrationTarget {
     handler: ChimpbaseWorkerHandler<TPayload, TResult>,
     definition?: ChimpbaseWorkerDefinition,
   ): ChimpbaseWorkerHandler<TPayload, TResult>;
+  registerCron?<TResult = unknown>(
+    name: string,
+    schedule: string,
+    handler: ChimpbaseCronHandler<TResult>,
+  ): ChimpbaseCronHandler<TResult>;
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -513,6 +539,13 @@ export interface ChimpbaseWorkerRegistration<TPayload = unknown, TResult = unkno
   handler: ChimpbaseWorkerHandler<TPayload, TResult>;
   kind: "worker";
   name: string;
+}
+
+export interface ChimpbaseCronRegistration<TResult = unknown> {
+  handler: ChimpbaseCronHandler<TResult>;
+  kind: "cron";
+  name: string;
+  schedule: string;
 }
 
 export interface ChimpbaseWorkflowRegisteredStep {
@@ -550,6 +583,7 @@ export interface ChimpbaseVersionedWorkflow<TInput = unknown, TState = unknown> 
 
 export type ChimpbaseRegistration =
   | ChimpbaseActionRegistration<any, any>
+  | ChimpbaseCronRegistration<any>
   | ChimpbaseSubscriptionRegistration<any, any>
   | ChimpbaseWorkerRegistration<any, any>
   | ChimpbaseWorkflowRegistration<any, any>;
@@ -579,6 +613,11 @@ type RuntimeGlobals = typeof globalThis & {
     handler: ChimpbaseWorkerHandler<TPayload, TResult>,
     definition?: ChimpbaseWorkerDefinition,
   ) => ChimpbaseWorkerHandler<TPayload, TResult>;
+  defineCron?: <TResult = unknown>(
+    name: string,
+    schedule: string,
+    handler: ChimpbaseCronHandler<TResult>,
+  ) => ChimpbaseCronHandler<TResult>;
   defineWorkflow?: <TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ) => ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -616,6 +655,19 @@ export function worker<TPayload = unknown, TResult = unknown>(
     handler,
     kind: "worker",
     name,
+  };
+}
+
+export function cron<TResult = unknown>(
+  name: string,
+  schedule: string,
+  handler: ChimpbaseCronHandler<TResult>,
+): ChimpbaseCronRegistration<TResult> {
+  return {
+    handler,
+    kind: "cron",
+    name,
+    schedule,
   };
 }
 
@@ -801,6 +853,13 @@ export function register(
       case "action":
         target.registerAction(entry.name, entry.handler);
         break;
+      case "cron":
+        if (typeof target.registerCron !== "function") {
+          throw new Error(`registration target does not support cron entries: ${entry.name}`);
+        }
+
+        target.registerCron(entry.name, entry.schedule, entry.handler);
+        break;
       case "subscription":
         target.registerSubscription(entry.eventName, entry.handler);
         break;
@@ -873,6 +932,16 @@ export function Worker(name: string, definition?: ChimpbaseWorkerDefinition) {
   };
 }
 
+export function Cron(name: string, schedule: string) {
+  return function (...args: unknown[]): void {
+    registerDecoratedMethod(
+      "Cron",
+      args,
+      (boundValue) => cron(name, schedule, boundValue as ChimpbaseCronHandler<any>),
+    );
+  };
+}
+
 export function defineAction<TArgs extends unknown[] = unknown[], TResult = unknown>(
   name: string,
   handler: ChimpbaseActionHandler<TArgs, TResult>,
@@ -910,6 +979,19 @@ export function defineWorker<TPayload = unknown, TResult = unknown>(
   return handler;
 }
 
+export function defineCron<TResult = unknown>(
+  name: string,
+  schedule: string,
+  handler: ChimpbaseCronHandler<TResult>,
+): ChimpbaseCronHandler<TResult> {
+  const runtimeDefineCron = (globalThis as RuntimeGlobals).defineCron;
+  if (typeof runtimeDefineCron === "function") {
+    return runtimeDefineCron(name, schedule, handler);
+  }
+
+  return handler;
+}
+
 export function defineWorkflow<TInput = unknown, TState = unknown>(
   definition: ChimpbaseWorkflowDefinition<TInput, TState>,
 ): ChimpbaseWorkflowDefinition<TInput, TState> {
@@ -922,7 +1004,7 @@ export function defineWorkflow<TInput = unknown, TState = unknown>(
 }
 
 function registerDecoratedMethod(
-  decoratorName: "Action" | "Subscription" | "Worker",
+  decoratorName: "Action" | "Cron" | "Subscription" | "Worker",
   args: unknown[],
   createEntry: (boundValue: ChimpbaseDecoratorMethod) => ChimpbaseAnyRegistration,
 ): void {

@@ -1,5 +1,6 @@
 import {
   action,
+  cron,
   worker,
   subscription,
 } from "@chimpbase/runtime";
@@ -23,6 +24,10 @@ import {
   listTodoEvents,
   listTodoNotifications,
 } from "./src/modules/todos/todo.audit.actions.ts";
+import {
+  captureTodoBacklogSnapshot,
+  listTodoBacklogSnapshots,
+} from "./src/modules/todos/todo.cron.ts";
 import {
   auditTodoAssigned,
   auditTodoCompleted,
@@ -67,11 +72,13 @@ export async function createTodoApplication() {
     action("listTodoAuditLog", listTodoAuditLog),
     action("listTodoEvents", listTodoEvents),
     action("listTodoNotifications", listTodoNotifications),
+    action("listTodoBacklogSnapshots", listTodoBacklogSnapshots),
     subscription("todo.created", auditTodoCreated),
     subscription("todo.assigned", auditTodoAssigned),
     subscription("todo.started", auditTodoStarted),
     subscription("todo.completed", auditTodoCompleted),
     subscription("todo.completed", enqueueTodoCompletedNotification),
+    cron("todo.backlog.snapshot", "*/15 * * * *", captureTodoBacklogSnapshot),
     action("listWorkspacePreferences", listWorkspacePreferences),
     action("setWorkspacePreference", setWorkspacePreference),
     action("addTodoNote", addTodoNote),

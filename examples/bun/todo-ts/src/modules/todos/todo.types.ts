@@ -93,6 +93,13 @@ export interface TodoNotificationRecord {
   created_at: string;
 }
 
+export interface TodoBacklogSnapshotRecord {
+  capturedAt: string;
+  id: string;
+  schedule: string;
+  summary: TodoDashboard;
+}
+
 export interface TodoPreferenceRecord {
   key: string;
   value: unknown;
