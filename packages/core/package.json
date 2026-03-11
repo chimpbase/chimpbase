@@ -1,12 +1,39 @@
 {
   "name": "@chimpbase/core",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Core engine, registry and execution model for Chimpbase.",
+  "license": "Apache-2.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chimpbase/chimpbase.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/chimpbase/chimpbase#readme",
+  "bugs": {
+    "url": "https://github.com/chimpbase/chimpbase/issues"
+  },
+  "keywords": [
+    "chimpbase",
+    "core",
+    "engine",
+    "workflow",
+    "typescript"
+  ],
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "exports": {
     ".": "./index.ts"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@chimpbase/runtime": "file:../runtime"
+    "@chimpbase/runtime": "workspace:^",
+    "kysely": "^0.28.11"
   }
 }

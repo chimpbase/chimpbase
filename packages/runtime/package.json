@@ -1,9 +1,38 @@
 {
   "name": "@chimpbase/runtime",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Runtime DSL and public primitives for Chimpbase applications.",
+  "license": "Apache-2.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chimpbase/chimpbase.git",
+    "directory": "packages/runtime"
+  },
+  "homepage": "https://github.com/chimpbase/chimpbase#readme",
+  "bugs": {
+    "url": "https://github.com/chimpbase/chimpbase/issues"
+  },
+  "keywords": [
+    "chimpbase",
+    "runtime",
+    "workflow",
+    "queue",
+    "typescript"
+  ],
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "exports": {
     ".": "./index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "kysely": "^0.28.11"
   }
 }

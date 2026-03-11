@@ -3,11 +3,11 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { createChimpbase } from "../src/library.ts";
-import { ChimpbaseBunHost } from "../src/runtime.ts";
+import { createChimpbase } from "../packages/bun/src/library.ts";
+import { ChimpbaseBunHost } from "../packages/bun/src/runtime.ts";
 
 const runtimeRoot = resolve(import.meta.dir, "..");
-const exampleDir = resolve(runtimeRoot, "examples/todo-ts");
+const exampleDir = resolve(runtimeRoot, "examples/bun/todo-ts");
 const cleanupDirs: string[] = [];
 
 afterEach(async () => {
@@ -60,6 +60,103 @@ describe("chimpbase-bun runtime", () => {
       host.close();
     } finally {
       restoreEnv(previousEnv);
+    }
+  });
+
+  test("preloads secrets from mounted files before env vars and .env", async () => {
+    const previousToken = process.env.APP_TOKEN;
+    const projectDir = await createInlineFixture("secrets-mounted", {
+      "index.ts": [
+        'import { action, register } from "@chimpbase/runtime";',
+        "",
+        "register({",
+        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
+        '  registerListener(name, handler) { return globalThis.defineListener(name, handler); },',
+        '  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },',
+        "}, [",
+        '  action("readSecret", async (ctx, name) => ctx.secret(name)),',
+        "]);",
+      ].join("\n"),
+    }, [
+      "[project]",
+      'name = "secrets-mounted"',
+      "",
+      "[storage]",
+      'engine = "memory"',
+      "",
+      "[secrets]",
+      'dir = "run/secrets"',
+      "",
+    ]);
+
+    try {
+      await writeFile(resolve(projectDir, ".env"), "APP_TOKEN=dotenv-token\n");
+      await mkdir(resolve(projectDir, "run/secrets"), { recursive: true });
+      await writeFile(resolve(projectDir, "run/secrets/APP_TOKEN"), "mounted-token");
+      process.env.APP_TOKEN = "env-token";
+
+      const host = await ChimpbaseBunHost.load(projectDir);
+
+      try {
+        const secret = await host.executeAction("readSecret", ["APP_TOKEN"]);
+        expect(secret.result).toBe("mounted-token");
+      } finally {
+        host.close();
+      }
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.APP_TOKEN;
+      } else {
+        process.env.APP_TOKEN = previousToken;
+      }
+    }
+  });
+
+  test("falls back to .env secrets when mounted files and env vars are absent", async () => {
+    const previousToken = process.env.APP_TOKEN;
+    const projectDir = await createInlineFixture("secrets-dotenv", {
+      "index.ts": [
+        'import { action, register } from "@chimpbase/runtime";',
+        "",
+        "register({",
+        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
+        '  registerListener(name, handler) { return globalThis.defineListener(name, handler); },',
+        '  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },',
+        "}, [",
+        '  action("readSecret", async (ctx, name) => ctx.secret(name)),',
+        "]);",
+      ].join("\n"),
+    }, [
+      "[project]",
+      'name = "secrets-dotenv"',
+      "",
+      "[storage]",
+      'engine = "memory"',
+      "",
+    ]);
+
+    try {
+      delete process.env.APP_TOKEN;
+      await writeFile(resolve(projectDir, ".env"), "APP_TOKEN=dotenv-token\n");
+
+      const host = await ChimpbaseBunHost.load(projectDir);
+
+      try {
+        const beforeEnvMutation = await host.executeAction("readSecret", ["APP_TOKEN"]);
+        expect(beforeEnvMutation.result).toBe("dotenv-token");
+
+        process.env.APP_TOKEN = "late-env-token";
+        const afterEnvMutation = await host.executeAction("readSecret", ["APP_TOKEN"]);
+        expect(afterEnvMutation.result).toBe("dotenv-token");
+      } finally {
+        host.close();
+      }
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.APP_TOKEN;
+      } else {
+        process.env.APP_TOKEN = previousToken;
+      }
     }
   });
 
@@ -165,10 +262,301 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("executes durable workflows across sleep and signal boundaries", async () => {
+    const projectDir = await createInlineFixture("workflow-mvp", {
+      "index.ts": [
+        'import { action, register, workflow, workflowActionStep, workflowSleepStep, workflowWaitForSignalStep } from "@chimpbase/runtime";',
+        "",
+        "const onboardingWorkflow = workflow({",
+        '    name: "customer.onboarding",',
+        "    version: 1,",
+        "    initialState(input) {",
+        "      return {",
+        "        activated: false,",
+        "        customerId: input.customerId,",
+        "        kickoffCompletedAt: null,",
+        "        provisioned: false,",
+        "      };",
+        "    },",
+        "    steps: [",
+        '      workflowActionStep("provision-account", "provisionCustomer", {',
+        "        args: ({ input }) => [input.customerId],",
+        "        onResult: ({ state }) => ({ ...state, provisioned: true }),",
+        "      }),",
+        '      workflowSleepStep("wait-a-beat", 15),',
+        '      workflowWaitForSignalStep("wait-kickoff", "kickoff.completed", {',
+        "        onSignal: ({ payload, state }) => ({ ...state, kickoffCompletedAt: payload.completedAt }),",
+        "        timeoutMs: 100,",
+        '        onTimeout: "fail",',
+        "      }),",
+        '      workflowActionStep("activate-account", "activateCustomer", {',
+        "        args: ({ state }) => [state.customerId],",
+        "        onResult: ({ state }) => ({ ...state, activated: true }),",
+        "      }),",
+        "    ],",
+        "});",
+        "",
+        "register({",
+        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
+        '  registerListener(name, handler) { return globalThis.defineListener(name, handler); },',
+        '  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },',
+        '  registerWorkflow(definition) { return globalThis.defineWorkflow(definition); },',
+        "}, [",
+        "  onboardingWorkflow,",
+        '  action("provisionCustomer", async (ctx, customerId) => {',
+        '    await ctx.collection.insert("workflow_audit", { customerId, step: "provision" });',
+        '    return { status: "ok" };',
+        "  }),",
+        '  action("activateCustomer", async (ctx, customerId) => {',
+        '    await ctx.collection.insert("workflow_audit", { customerId, step: "activate" });',
+        '    return { status: "ok" };',
+        "  }),",
+        '  action("startOnboarding", async (ctx, customerId) => {',
+        '    return await ctx.workflow.start("customer.onboarding", { customerId }, { workflowId: `workflow:${customerId}` });',
+        "  }),",
+        '  action("signalKickoffCompleted", async (ctx, customerId, completedAt) => {',
+        '    await ctx.workflow.signal(`workflow:${customerId}`, "kickoff.completed", { completedAt });',
+        "    return { ok: true };",
+        "  }),",
+        '  action("getOnboarding", async (ctx, customerId) => await ctx.workflow.get(`workflow:${customerId}`)),',
+        '  action("listWorkflowAudit", async (ctx) => await ctx.collection.find("workflow_audit")),',
+        "]);",
+      ].join("\n"),
+    }, [
+      "[project]",
+      'name = "workflow-mvp"',
+      "",
+      "[storage]",
+      'engine = "sqlite"',
+      'path = "data/workflow.db"',
+      "",
+    ]);
+
+    const host = await ChimpbaseBunHost.load(projectDir);
+
+    try {
+      const started = await host.executeAction("startOnboarding", ["cus_123"]);
+      expect(started.result).toEqual({
+        status: "running",
+        workflowId: "workflow:cus_123",
+        workflowName: "customer.onboarding",
+        workflowVersion: 1,
+      });
+
+      const firstRun = await host.processNextQueueJob();
+      expect(firstRun?.queueName).toBe("__chimpbase.workflow.run");
+
+      let instance = await host.executeAction("getOnboarding", ["cus_123"]);
+      expect(instance.result).toEqual(
+        expect.objectContaining({
+          currentStepId: "wait-kickoff",
+          state: expect.objectContaining({
+            customerId: "cus_123",
+            provisioned: true,
+          }),
+          status: "sleeping",
+        }),
+      );
+
+      await Bun.sleep(20);
+      const secondRun = await host.processNextQueueJob();
+      expect(secondRun?.queueName).toBe("__chimpbase.workflow.run");
+
+      instance = await host.executeAction("getOnboarding", ["cus_123"]);
+      expect(instance.result).toEqual(
+        expect.objectContaining({
+          currentStepId: "wait-kickoff",
+          status: "waiting_signal",
+        }),
+      );
+
+      await host.executeAction("signalKickoffCompleted", ["cus_123", "2026-03-10T10:00:00.000Z"]);
+      const thirdRun = await host.processNextQueueJob();
+      expect(thirdRun?.queueName).toBe("__chimpbase.workflow.run");
+
+      instance = await host.executeAction("getOnboarding", ["cus_123"]);
+      expect(instance.result).toEqual(
+        expect.objectContaining({
+          currentStepId: null,
+          state: {
+            activated: true,
+            customerId: "cus_123",
+            kickoffCompletedAt: "2026-03-10T10:00:00.000Z",
+            provisioned: true,
+          },
+          status: "completed",
+        }),
+      );
+
+      const audit = await host.executeAction("listWorkflowAudit");
+      expect(audit.result).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ customerId: "cus_123", step: "provision" }),
+          expect.objectContaining({ customerId: "cus_123", step: "activate" }),
+        ]),
+      );
+    } finally {
+      host.close();
+    }
+  });
+
+  test("executes imperative durable workflows with switch-based state transitions", async () => {
+    const projectDir = await createInlineFixture("workflow-imperative", {
+      "index.ts": [
+        'import { action, register, workflow } from "@chimpbase/runtime";',
+        "",
+        "const onboardingWorkflow = workflow({",
+        '  name: "customer.onboarding.machine",',
+        "  version: 1,",
+        "  initialState(input) {",
+        "    return {",
+        '      phase: "provision",',
+        "      activated: false,",
+        "      customerId: input.customerId,",
+        "      kickoffCompletedAt: null,",
+        "      provisioned: false,",
+        "    };",
+        "  },",
+        "  async run(wf) {",
+        "    switch (wf.state.phase) {",
+        '      case "provision": {',
+        '        await wf.action("provisionCustomer", wf.state.customerId);',
+        '        if (wf.state.customerId.startsWith("vip_")) {',
+        "          return wf.sleep(15, {",
+        '            stepId: "wait-a-beat",',
+        '            state: { ...wf.state, phase: "waiting_kickoff", provisioned: true },',
+        "          });",
+        "        }",
+        '        return wf.transition({ ...wf.state, phase: "waiting_kickoff", provisioned: true });',
+        "      }",
+        '      case "waiting_kickoff":',
+        '        return wf.waitForSignal("kickoff.completed", {',
+        '          stepId: "wait-kickoff",',
+        '          timeoutMs: 100,',
+        '          onSignal: ({ payload, state }) => ({ ...state, phase: "activating", kickoffCompletedAt: payload.completedAt }),',
+        '          onTimeout: "fail",',
+        "        });",
+        '      case "activating":',
+        '        await wf.action("activateCustomer", wf.state.customerId);',
+        '        return wf.complete({ ...wf.state, phase: "done", activated: true });',
+        '      case "done":',
+        "        return wf.complete(wf.state);",
+        "      default:",
+        '        return wf.fail(`unknown phase: ${wf.state.phase}`);',
+        "    }",
+        "  },",
+        "});",
+        "",
+        "register({",
+        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
+        '  registerListener(name, handler) { return globalThis.defineListener(name, handler); },',
+        '  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },',
+        '  registerWorkflow(definition) { return globalThis.defineWorkflow(definition); },',
+        "}, [",
+        "  onboardingWorkflow,",
+        '  action("provisionCustomer", async (ctx, customerId) => {',
+        '    await ctx.collection.insert("workflow_machine_audit", { customerId, step: "provision" });',
+        '    return { status: "ok" };',
+        "  }),",
+        '  action("activateCustomer", async (ctx, customerId) => {',
+        '    await ctx.collection.insert("workflow_machine_audit", { customerId, step: "activate" });',
+        '    return { status: "ok" };',
+        "  }),",
+        '  action("startOnboardingMachine", async (ctx, customerId) => {',
+        '    return await ctx.workflow.start("customer.onboarding.machine", { customerId }, { workflowId: `workflow-machine:${customerId}` });',
+        "  }),",
+        '  action("signalMachineKickoffCompleted", async (ctx, customerId, completedAt) => {',
+        '    await ctx.workflow.signal(`workflow-machine:${customerId}`, "kickoff.completed", { completedAt });',
+        "    return { ok: true };",
+        "  }),",
+        '  action("getOnboardingMachine", async (ctx, customerId) => await ctx.workflow.get(`workflow-machine:${customerId}`)),',
+        '  action("listWorkflowMachineAudit", async (ctx) => await ctx.collection.find("workflow_machine_audit")),',
+        "]);",
+      ].join("\n"),
+    }, [
+      "[project]",
+      'name = "workflow-imperative"',
+      "",
+      "[storage]",
+      'engine = "sqlite"',
+      'path = "data/workflow-imperative.db"',
+      "",
+    ]);
+
+    const host = await ChimpbaseBunHost.load(projectDir);
+
+    try {
+      const started = await host.executeAction("startOnboardingMachine", ["vip_123"]);
+      expect(started.result).toEqual({
+        status: "running",
+        workflowId: "workflow-machine:vip_123",
+        workflowName: "customer.onboarding.machine",
+        workflowVersion: 1,
+      });
+
+      const firstRun = await host.processNextQueueJob();
+      expect(firstRun?.queueName).toBe("__chimpbase.workflow.run");
+
+      let instance = await host.executeAction("getOnboardingMachine", ["vip_123"]);
+      expect(instance.result).toEqual(
+        expect.objectContaining({
+          currentStepId: "wait-a-beat",
+          state: expect.objectContaining({
+            customerId: "vip_123",
+            phase: "waiting_kickoff",
+            provisioned: true,
+          }),
+          status: "sleeping",
+        }),
+      );
+
+      await Bun.sleep(20);
+      const secondRun = await host.processNextQueueJob();
+      expect(secondRun?.queueName).toBe("__chimpbase.workflow.run");
+
+      instance = await host.executeAction("getOnboardingMachine", ["vip_123"]);
+      expect(instance.result).toEqual(
+        expect.objectContaining({
+          currentStepId: "wait-kickoff",
+          status: "waiting_signal",
+        }),
+      );
+
+      await host.executeAction("signalMachineKickoffCompleted", ["vip_123", "2026-03-11T11:00:00.000Z"]);
+      const thirdRun = await host.processNextQueueJob();
+      expect(thirdRun?.queueName).toBe("__chimpbase.workflow.run");
+
+      instance = await host.executeAction("getOnboardingMachine", ["vip_123"]);
+      expect(instance.result).toEqual(
+        expect.objectContaining({
+          currentStepId: null,
+          state: {
+            activated: true,
+            customerId: "vip_123",
+            kickoffCompletedAt: "2026-03-11T11:00:00.000Z",
+            phase: "done",
+            provisioned: true,
+          },
+          status: "completed",
+        }),
+      );
+
+      const audit = await host.executeAction("listWorkflowMachineAudit");
+      expect(audit.result).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ customerId: "vip_123", step: "provision" }),
+          expect.objectContaining({ customerId: "vip_123", step: "activate" }),
+        ]),
+      );
+    } finally {
+      host.close();
+    }
+  });
+
   test("routes failed jobs to a custom dlq", async () => {
     const projectDir = await createInlineFixture("dlq", {
       "index.ts": [
-        'import { action, queue, registerChimpbaseEntries } from "@chimpbase/runtime";',
+        'import { action, queue, register } from "@chimpbase/runtime";',
         "",
         'const entries = [',
         'action("enqueueExplodingJob", async (ctx) => {',
@@ -195,7 +583,7 @@ describe("chimpbase-bun runtime", () => {
         '  return await ctx.query("SELECT queue_name, error_message, attempts FROM dlq_captures ORDER BY id ASC");',
         "}),",
         "];",
-        'registerChimpbaseEntries({',
+        'register({',
         '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
         '  registerListener(name, handler) { return globalThis.defineListener(name, handler); },',
         '  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },',
@@ -246,7 +634,7 @@ describe("chimpbase-bun runtime", () => {
   test("registers actions, listeners and queues with decorators", async () => {
     const projectDir = await createInlineFixture("decorators", {
       "index.ts": [
-        'import { Action, Listener, Queue, registerDecoratedEntries } from "@chimpbase/runtime";',
+        'import { Action, Listener, Queue, registerFrom } from "@chimpbase/runtime";',
         "",
         "class DecoratedTodoModule {",
         '  @Action("createDecoratedTodo")',
@@ -273,7 +661,7 @@ describe("chimpbase-bun runtime", () => {
         "  }",
         "}",
         "",
-        "registerDecoratedEntries({",
+        "registerFrom({",
         '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
         '  registerListener(name, handler) { return globalThis.defineListener(name, handler); },',
         '  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },',
@@ -327,7 +715,7 @@ describe("chimpbase-bun runtime", () => {
   test("registers instance methods with decorators", async () => {
     const projectDir = await createInlineFixture("decorator-instances", {
       "index.ts": [
-        'import { Action, Listener, Queue, registerDecoratedEntries } from "@chimpbase/runtime";',
+        'import { Action, Listener, Queue, registerFrom } from "@chimpbase/runtime";',
         "",
         "class InstanceDecoratedTodoModule {",
         '  @Action("createInstanceDecoratedTodo")',
@@ -355,7 +743,7 @@ describe("chimpbase-bun runtime", () => {
         "}",
         "",
         "const moduleInstance = new InstanceDecoratedTodoModule();",
-        "registerDecoratedEntries({",
+        "registerFrom({",
         '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
         '  registerListener(name, handler) { return globalThis.defineListener(name, handler); },',
         '  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },',
@@ -479,7 +867,7 @@ async function createFixture(label: string): Promise<string> {
       'import { todoApiApp } from "./src/http/app.ts";',
       'export const fetch = todoApiApp.fetch.bind(todoApiApp);',
       'export { todoApiApp as app };',
-      'import { action, listener, queue, registerChimpbaseEntries } from "@chimpbase/runtime";',
+      'import { action, listener, queue, register } from "@chimpbase/runtime";',
       'import { createProject, listProjects } from "./src/modules/projects/project.actions.ts";',
       'import { assignTodo, completeTodo, createTodo, getTodoDashboard, listTodos, startTodo } from "./src/modules/todos/todo.actions.ts";',
       'import { listTodoAuditLog, listTodoEvents, listTodoNotifications } from "./src/modules/todos/todo.audit.actions.ts";',
@@ -487,7 +875,7 @@ async function createFixture(label: string): Promise<string> {
       'import { addTodoNote, listTodoActivityStream, listTodoNotes, listWorkspacePreferences, setWorkspacePreference } from "./src/modules/todos/todo.platform.actions.ts";',
       'import { captureTodoCompletedDlq, notifyTodoCompleted } from "./src/modules/todos/todo.queues.ts";',
       'import { seedDemoWorkspace } from "./src/modules/todos/todo.seed.actions.ts";',
-      'registerChimpbaseEntries({',
+      'register({',
       '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
       '  registerListener(name, handler) { return globalThis.defineListener(name, handler); },',
       '  registerQueue(name, handler, definition) { return globalThis.defineQueue(name, handler, definition); },',
@@ -524,6 +912,9 @@ async function createFixture(label: string): Promise<string> {
   await cp(resolve(runtimeRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
     recursive: true,
   });
+  await cp(resolve(runtimeRoot, "node_modules/kysely"), resolve(dir, "node_modules/kysely"), {
+    recursive: true,
+  });
   await writeFile(
     resolve(dir, "package.json"),
     JSON.stringify(
@@ -531,6 +922,7 @@ async function createFixture(label: string): Promise<string> {
         dependencies: {
           "@chimpbase/runtime": "file:./packages/runtime",
           hono: "^4.12.5",
+          kysely: "^0.28.11",
         },
       },
       null,
@@ -580,6 +972,9 @@ async function createInlineFixture(
   await cp(resolve(runtimeRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
     recursive: true,
   });
+  await cp(resolve(runtimeRoot, "node_modules/kysely"), resolve(dir, "node_modules/kysely"), {
+    recursive: true,
+  });
 
   await writeFile(
     resolve(dir, "package.json"),
@@ -587,6 +982,7 @@ async function createInlineFixture(
       {
         dependencies: {
           "@chimpbase/runtime": "file:./packages/runtime",
+          kysely: "^0.28.11",
         },
       },
       null,

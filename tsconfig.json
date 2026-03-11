@@ -13,11 +13,11 @@
     "paths": {
       "@chimpbase/core": ["./packages/core/index.ts"],
       "@chimpbase/runtime": ["./packages/runtime/index.ts"],
-      "chimpbase-bun": ["./src/library.ts"]
+      "@chimpbase/bun": ["./packages/bun/src/library.ts"]
     }
   },
   "include": [
-    "src/**/*.ts",
+    "packages/bun/**/*.ts",
     "tests/**/*.ts",
     "packages/core/**/*.ts",
     "packages/runtime/**/*.ts",

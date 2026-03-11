@@ -1,5 +1,5 @@
-import { access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { access, rm, symlink } from "node:fs/promises";
+import { dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type {
@@ -8,6 +8,7 @@ import type {
   ChimpbaseQueueDefinition,
   ChimpbaseQueueHandler,
   ChimpbaseRouteHandler,
+  ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
 
 export interface ChimpbaseProjectConfig {
@@ -28,6 +29,13 @@ export interface ChimpbaseProjectConfig {
     pollIntervalMs: number;
     retryDelayMs: number;
   };
+  secrets: {
+    dir: string | null;
+    envFile: string | null;
+  };
+  workflows: {
+    contractsDir: string | null;
+  };
 }
 
 export interface ChimpbaseProjectConfigInput {
@@ -47,6 +55,13 @@ export interface ChimpbaseProjectConfigInput {
     maxAttempts?: number;
     pollIntervalMs?: number;
     retryDelayMs?: number;
+  };
+  secrets?: {
+    dir?: string | null;
+    envFile?: string | null;
+  };
+  workflows?: {
+    contractsDir?: string | null;
   };
 }
 
@@ -79,6 +94,7 @@ export interface ChimpbaseRegistry {
   httpHandler: ChimpbaseRouteHandler | null;
   listeners: Map<string, ChimpbaseListenerHandler[]>;
   queues: Map<string, ChimpbaseQueueRegistration>;
+  workflows: Map<string, Map<number, ChimpbaseWorkflowDefinition>>;
 }
 
 export interface ChimpbaseEntrypointTarget {
@@ -95,6 +111,9 @@ export interface ChimpbaseEntrypointTarget {
     handler: ChimpbaseQueueHandler<TPayload, TResult>,
     definition?: ChimpbaseQueueDefinition,
   ): ChimpbaseQueueHandler<TPayload, TResult>;
+  registerWorkflow<TInput = unknown, TState = unknown>(
+    definition: ChimpbaseWorkflowDefinition<TInput, TState>,
+  ): ChimpbaseWorkflowDefinition<TInput, TState>;
   setHttpHandler(handler: ChimpbaseRouteHandler | null): void;
 }
 
@@ -112,6 +131,9 @@ interface RuntimeGlobals {
     handler: ChimpbaseQueueHandler<TPayload, TResult>,
     definition?: ChimpbaseQueueDefinition,
   ) => ChimpbaseQueueHandler<TPayload, TResult>;
+  defineWorkflow?: <TInput = unknown, TState = unknown>(
+    definition: ChimpbaseWorkflowDefinition<TInput, TState>,
+  ) => ChimpbaseWorkflowDefinition<TInput, TState>;
 }
 
 type RuntimeGlobalScope = typeof globalThis & RuntimeGlobals;
@@ -137,6 +159,13 @@ export function normalizeProjectConfig(
       pollIntervalMs: input.worker?.pollIntervalMs ?? 250,
       retryDelayMs: input.worker?.retryDelayMs ?? 1_000,
     },
+    secrets: {
+      dir: input.secrets?.dir ?? null,
+      envFile: input.secrets?.envFile ?? null,
+    },
+    workflows: {
+      contractsDir: input.workflows?.contractsDir ?? "workflow-contracts",
+    },
   };
 }
 
@@ -160,6 +189,7 @@ export function createChimpbaseRegistry(): ChimpbaseRegistry {
     httpHandler: null,
     listeners: new Map(),
     queues: new Map(),
+    workflows: new Map(),
   };
 }
 
@@ -173,9 +203,19 @@ export async function loadChimpbaseEntrypoint(
   }
 
   await withChimpbaseRegistration(target, async () => {
-    const entrypointUrl = `${pathToFileURL(entrypointPath).href}?t=${Date.now()}`;
-    const entrypointModule = await import(entrypointUrl);
-    target.setHttpHandler(resolveHttpHandler(entrypointModule));
+    const entrypointAliasPath = join(
+      dirname(entrypointPath),
+      `.__chimpbase_entrypoint_${crypto.randomUUID()}${extname(entrypointPath) || ".ts"}`,
+    );
+
+    await symlink(entrypointPath, entrypointAliasPath);
+
+    try {
+      const entrypointModule = await import(pathToFileURL(entrypointAliasPath).href);
+      target.setHttpHandler(resolveHttpHandler(entrypointModule));
+    } finally {
+      await rm(entrypointAliasPath, { force: true });
+    }
   });
 }
 
@@ -187,6 +227,7 @@ export async function withChimpbaseRegistration<TResult>(
   const previousDefineAction = globals.defineAction;
   const previousDefineListener = globals.defineListener;
   const previousDefineQueue = globals.defineQueue;
+  const previousDefineWorkflow = globals.defineWorkflow;
 
   globals.defineAction = ((name: string, handler: ChimpbaseActionHandler) => {
     return target.registerAction(name, handler);
@@ -200,12 +241,17 @@ export async function withChimpbaseRegistration<TResult>(
     return target.registerQueue(name, handler, definition);
   }) as RuntimeGlobals["defineQueue"];
 
+  globals.defineWorkflow = ((definition: ChimpbaseWorkflowDefinition) => {
+    return target.registerWorkflow(definition);
+  }) as RuntimeGlobals["defineWorkflow"];
+
   try {
     return await callback();
   } finally {
     globals.defineAction = previousDefineAction;
     globals.defineListener = previousDefineListener;
     globals.defineQueue = previousDefineQueue;
+    globals.defineWorkflow = previousDefineWorkflow;
   }
 }
 
