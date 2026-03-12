@@ -12,6 +12,7 @@ import {
   type ChimpbaseDrainOptions,
   type ChimpbaseDrainResult,
   type ChimpbaseEngineAdapter,
+  type ChimpbaseEventBus,
   type ChimpbaseMigration,
   type ChimpbaseMigrationsDefinition,
   type ChimpbaseMigrationSource,
@@ -31,6 +32,7 @@ import {
   createPostgresEngineAdapter,
   ensurePostgresInternalTables,
   openPostgresPool,
+  PostgresPollingEventBus,
 } from "@chimpbase/postgres";
 import {
   action as createActionEntry,
@@ -142,7 +144,7 @@ export class ChimpbaseDenoHost {
     const projectDir = resolve(options.projectDir ?? ".");
     const platform = options.platform ?? createDefaultChimpbasePlatformShim();
     const registry = createChimpbaseRegistry();
-    const { adapter, storage } = await openStorage(
+    const { adapter, eventBus, storage } = await openStorage(
       projectDir,
       options.config,
       platform,
@@ -160,6 +162,7 @@ export class ChimpbaseDenoHost {
     });
     const engine = new ChimpbaseEngine({
       adapter,
+      eventBus,
       platform,
       registry,
       secrets,
@@ -403,6 +406,7 @@ export class ChimpbaseDenoHost {
     const runWorker = options.runWorker ?? !options.serve;
     const worker = runWorker ? this.startWorker() : null;
     const server = runServe ? this.serve() : null;
+    this.engine.startEventBus();
 
     return {
       host: this,
@@ -410,6 +414,7 @@ export class ChimpbaseDenoHost {
       async stop() {
         server?.shutdown?.();
         worker?.stop();
+        this.host.engine.stopEventBus();
         await server?.finished;
       },
     };
@@ -457,6 +462,7 @@ export class ChimpbaseDenoHost {
   }
 
   close(): void {
+    this.engine.stopEventBus();
     void this.storage.close();
   }
 
@@ -580,7 +586,7 @@ async function openStorage(
   inlineMigrations: readonly ChimpbaseMigration[],
   migrationSource: ChimpbaseMigrationSource,
   migrationsSql: string[],
-): Promise<{ adapter: ChimpbaseEngineAdapter; storage: StorageHandle }> {
+): Promise<{ adapter: ChimpbaseEngineAdapter; eventBus?: ChimpbaseEventBus; storage: StorageHandle }> {
   const resolvedMigrations = [
     ...await migrationSource.list(),
     ...inlineMigrations,
@@ -595,9 +601,11 @@ async function openStorage(
     await applyPostgresSqlMigrations(pool, resolvedMigrations.map((migration) => migration.sql));
     await applyInlinePostgresMigrations(pool, migrationsSql);
     await ensurePostgresInternalTables(pool);
+    const eventBus = new PostgresPollingEventBus({ pool });
 
     return {
       adapter: createPostgresEngineAdapter(pool, platform),
+      eventBus,
       storage: {
         close() {
           return pool.end();

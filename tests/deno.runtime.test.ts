@@ -221,6 +221,67 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("dispatches postgres subscriptions across Deno hosts", async () => {
+      const database = await postgres.createDatabase("deno_cross_process_subscriptions");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-cross-process-"));
+      cleanupDirs.push(projectDir);
+
+      installFakeDenoRuntime({
+        env: {},
+      });
+
+      const migrationsSql = [
+        "CREATE TABLE IF NOT EXISTS cross_process_audit (id SERIAL PRIMARY KEY, value TEXT NOT NULL);",
+      ];
+      const subscriber = await ChimpbaseDenoHost.create({
+        config: normalizeProjectConfig({
+          project: { name: "deno-cross-process-subscriber" },
+          storage: { engine: "postgres", url: database.url },
+        }),
+        migrationsSql,
+        projectDir,
+      });
+      const publisher = await ChimpbaseDenoHost.create({
+        config: normalizeProjectConfig({
+          project: { name: "deno-cross-process-publisher" },
+          storage: { engine: "postgres", url: database.url },
+        }),
+        migrationsSql,
+        projectDir,
+      });
+
+      subscriber.registerSubscription("audit.created", async (ctx, payload) => {
+        await ctx.query("INSERT INTO cross_process_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+      });
+      publisher.registerAction("publishAudit", async (ctx, value) => {
+        ctx.pubsub.publish("audit.created", { value });
+        return null;
+      });
+      publisher.registerAction(
+        "listAudit",
+        async (ctx) => await ctx.query("SELECT value FROM cross_process_audit ORDER BY id ASC"),
+      );
+
+      const startedSubscriber = subscriber.start({ runWorker: false, serve: false });
+
+      try {
+        await sleep(100);
+        await publisher.executeAction("publishAudit", ["from-publisher"]);
+
+        await waitFor(async () => {
+          const audit = await publisher.executeAction("listAudit");
+          return audit.result as Array<{ value: string }>;
+        }, (rows) => rows.length === 1);
+
+        const audit = await publisher.executeAction("listAudit");
+        expect(audit.result).toEqual([{ value: "from-publisher" }]);
+      } finally {
+        await startedSubscriber.stop();
+        publisher.close();
+        subscriber.close();
+      }
+    }, 30000);
+
     test("createChimpbaseDeno accepts typed TS migrations", async () => {
       const database = await postgres.createDatabase("deno_typed_migrations");
       const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-typed-migrations-"));
@@ -718,4 +779,29 @@ async function createDenoProjectFixture(label: string, databaseUrl: string): Pro
   );
 
   return dir;
+}
+
+async function waitFor<T>(
+  load: () => Promise<T>,
+  predicate: (value: T) => boolean,
+  options: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<T> {
+  const intervalMs = options.intervalMs ?? 50;
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    const value = await load();
+    if (predicate(value)) {
+      return value;
+    }
+
+    await sleep(intervalMs);
+  }
+
+  throw new Error(`condition not met within ${timeoutMs}ms`);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
