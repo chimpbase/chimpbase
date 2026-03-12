@@ -115,6 +115,29 @@ if (!dockerAvailable) {
         databaseUrl: changedDatabase.url,
       })).rejects.toThrow("generated schema types are out of date");
     }, 30000);
+
+    test("generates schema artifacts from chimpbase.migrations.ts", async () => {
+      const projectDir = await createTypedSchemaFixture("typed", [
+        "CREATE TABLE typed_accounts (",
+        "  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,",
+        "  email TEXT NOT NULL UNIQUE",
+        ");",
+      ].join("\n"));
+
+      const database = await postgres.createDatabase("schema_typed");
+      const generated = await syncChimpbaseSchemaArtifacts(projectDir, {
+        databaseUrl: database.url,
+      });
+
+      expect(generated.snapshot.tables).toEqual([
+        expect.objectContaining({
+          name: "typed_accounts",
+        }),
+      ]);
+
+      const typesFile = await readFile(generated.typesPath, "utf8");
+      expect(typesFile).toContain('"typed_accounts": TypedAccountsTable;');
+    }, 30000);
   });
 }
 
@@ -135,6 +158,35 @@ async function createSchemaFixture(label: string, migrationSql: string): Promise
     ].join("\n"),
   );
   await writeFile(resolve(dir, "migrations/postgres/001_init.sql"), migrationSql);
+
+  return dir;
+}
+
+async function createTypedSchemaFixture(label: string, migrationSql: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), `chimpbase-schema-typed-${label}-`));
+  cleanupDirs.push(dir);
+
+  await writeFile(
+    resolve(dir, "chimpbase.toml"),
+    [
+      "[project]",
+      'name = "schema-test"',
+      "",
+      "[storage]",
+      'engine = "postgres"',
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    resolve(dir, "chimpbase.migrations.ts"),
+    [
+      "export default {",
+      "  postgres: [",
+      `    { name: "001_init", sql: ${JSON.stringify(migrationSql)} },`,
+      "  ],",
+      "};",
+    ].join("\n"),
+  );
 
   return dir;
 }

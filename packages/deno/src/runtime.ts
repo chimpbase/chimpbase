@@ -4,6 +4,7 @@ import {
   ChimpbaseEngine,
   createDefaultChimpbasePlatformShim,
   createChimpbaseRegistry,
+  listChimpbaseMigrationsForEngine,
   type ChimpbaseActionExecutionResult,
   type ChimpbaseCronScheduleExecutionResult,
   type ChimpbaseDrainOptions,
@@ -11,6 +12,7 @@ import {
   type ChimpbaseEntrypointTarget,
   type ChimpbaseEngineAdapter,
   type ChimpbaseMigration,
+  type ChimpbaseMigrationsDefinition,
   type ChimpbaseMigrationSource,
   type ChimpbasePlatformShim,
   type ChimpbaseProjectConfig,
@@ -45,7 +47,7 @@ import {
   type ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
 import { loadProjectConfig } from "@chimpbase/tooling/config";
-import { readSqlMigrations, resolveLocalMigrationsDir } from "@chimpbase/tooling/migrations";
+import { loadProjectMigrations } from "@chimpbase/tooling/migrations";
 import { loadLocalSecretStore } from "@chimpbase/tooling/secrets";
 import {
   syncRegisteredWorkflowContracts,
@@ -83,6 +85,7 @@ export type { DenoServeHandle } from "./deno_runtime.ts";
 export interface CreateHostOptions {
   config: ChimpbaseProjectConfig;
   entrypointPath?: string;
+  migrations?: ChimpbaseMigrationsDefinition;
   migrationSource?: ChimpbaseMigrationSource;
   migrationsDir?: string | null;
   migrationsSql?: string[];
@@ -136,7 +139,8 @@ export class ChimpbaseDenoHost implements ChimpbaseEntrypointTarget {
       projectDir,
       options.config,
       platform,
-      options.migrationSource ?? createLocalMigrationSource(options.config, options.migrationsDir ?? null),
+      listChimpbaseMigrationsForEngine(options.migrations, options.config.storage.engine),
+      options.migrationSource ?? createLocalMigrationSource(projectDir, options.config, options.migrationsDir ?? null),
       options.migrationsSql ?? [],
     );
     const secrets = options.secrets ?? await loadLocalSecretStore(projectDir, options.config, {
@@ -435,10 +439,14 @@ async function openStorage(
   projectDir: string,
   config: ChimpbaseProjectConfig,
   platform: ChimpbasePlatformShim,
+  inlineMigrations: readonly ChimpbaseMigration[],
   migrationSource: ChimpbaseMigrationSource,
   migrationsSql: string[],
 ): Promise<{ adapter: ChimpbaseEngineAdapter; storage: StorageHandle }> {
-  const resolvedMigrations = await migrationSource.list();
+  const resolvedMigrations = [
+    ...await migrationSource.list(),
+    ...inlineMigrations,
+  ];
 
   if (config.storage.engine === "postgres") {
     if (!config.storage.url) {
@@ -476,15 +484,13 @@ async function openStorage(
 }
 
 function createLocalMigrationSource(
+  projectDir: string,
   config: ChimpbaseProjectConfig,
   migrationsDir: string | null,
 ): ChimpbaseMigrationSource {
   return {
     async list(): Promise<ChimpbaseMigration[]> {
-      return await readSqlMigrations(await resolveLocalMigrationsDir(
-        migrationsDir,
-        config.storage.engine,
-      ));
+      return await loadProjectMigrations(projectDir, config.storage.engine, { migrationsDir });
     },
   };
 }

@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/core",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Core engine, registry and execution model for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",

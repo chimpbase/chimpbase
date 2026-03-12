@@ -40,60 +40,67 @@ Bun:
 ```ts
 import {
   action,
-  worker,
   subscription,
+  worker,
 } from "@chimpbase/runtime";
-import { createChimpbase } from "@chimpbase/bun";
+import { createChimpbase, defineChimpbaseApp } from "@chimpbase/bun";
 
-const chimpbase = await createChimpbase.from(import.meta.dir);
+const app = defineChimpbaseApp({
+  project: { name: "acme" },
+  registrations: [
+    action("createCustomer", async (ctx, input) => {
+      const [customer] = await ctx.query<{ id: number }>(
+        "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id",
+        [input.email, input.name, input.plan],
+      );
 
-chimpbase.register(
-  action("createCustomer", async (ctx, input) => {
-    const [customer] = await ctx.query<{ id: number }>(
-      "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id",
-      [input.email, input.name, input.plan],
-    );
+      await ctx.kv.set(`customer:${customer.id}:status`, "new");
 
-    await ctx.kv.set(`customer:${customer.id}:status`, "new");
+      await ctx.collection.insert("customer_profiles", {
+        customerId: customer.id,
+        plan: input.plan,
+        source: "signup",
+      });
 
-    await ctx.collection.insert("customer_profiles", {
-      customerId: customer.id,
-      plan: input.plan,
-      source: "signup",
-    });
+      await ctx.stream.append("customers", "customer.created", {
+        customerId: customer.id,
+        email: input.email,
+      });
 
-    await ctx.stream.append("customers", "customer.created", {
-      customerId: customer.id,
-      email: input.email,
-    });
+      ctx.pubsub.publish("customer.created", {
+        customerId: customer.id,
+        email: input.email,
+      });
 
-    ctx.pubsub.publish("customer.created", {
-      customerId: customer.id,
-      email: input.email,
-    });
+      return customer;
+    }),
+    subscription("customer.created", async (ctx, event) => {
+      await ctx.queue.enqueue("customer.sync", event);
+    }),
+    worker("customer.sync", async (ctx, event) => {
+      const apiKey = ctx.secret("CRM_API_KEY");
 
-    return customer;
-  }),
+      ctx.log.info("syncing customer", { customerId: event.customerId });
+      ctx.metric("customer_sync_total", 1, { source: "crm" });
 
-  subscription("customer.created", async (ctx, event) => {
-    await ctx.queue.enqueue("customer.sync", event);
-  }),
+      await ctx.collection.update(
+        "customer_profiles",
+        { customerId: event.customerId },
+        { syncedWithCrm: true },
+      );
 
-  worker("customer.sync", async (ctx, event) => {
-    const apiKey = ctx.secret("CRM_API_KEY");
-
-    ctx.log.info("syncing customer", { customerId: event.customerId });
-    ctx.metric("customer_sync_total", 1, { source: "crm" });
-
-    await ctx.collection.update(
-      "customer_profiles",
-      { customerId: event.customerId },
-      { syncedWithCrm: true },
-    );
-
-    return { apiKeyLoaded: Boolean(apiKey) };
-  }),
+      return { apiKeyLoaded: Boolean(apiKey) };
+    }),
+  ],
+  telemetry: {
+    minLevel: "info",
+  },
 );
+
+const chimpbase = await createChimpbase({
+  app,
+  storage: { engine: "postgres", url: process.env.DATABASE_URL! },
+});
 
 await chimpbase.start();
 ```
@@ -101,20 +108,31 @@ await chimpbase.start();
 Deno CLI/self-hosted:
 
 ```ts
-import { createChimpbaseDeno } from "npm:@chimpbase/deno";
+import { action } from "npm:@chimpbase/runtime";
+import { createChimpbaseDeno, defineChimpbaseApp } from "npm:@chimpbase/deno";
 
-const chimpbase = await createChimpbaseDeno.from(Deno.cwd(), {
-  storage: { engine: "sqlite" },
+const app = defineChimpbaseApp({
+  project: { name: "acme-deno" },
+  registrations: [
+    action("health", async () => ({ ok: true })),
+  ],
+});
+
+const chimpbase = await createChimpbaseDeno({
+  app,
+  storage: { engine: "sqlite", path: "data/acme-deno.db" },
 });
 
 await chimpbase.start();
 ```
 
-That is the shape chimpbase is optimizing for:
+That is the canonical shape chimpbase is optimizing for:
 
 - SQL when you want SQL
-- small runtime primitives for the glue around it
-- one place to define actions, reactions and async work
+- one code-first app definition with `registrations`
+- deploy/runtime wiring provided by the host package
+
+`createChimpbase.from(import.meta.dir)` and `createChimpbaseDeno.from(Deno.cwd())` still exist as compatibility helpers. If `chimpbase.app.ts` is present, those loaders now prefer it over legacy project discovery.
 
 ## Why this feels simple
 
@@ -303,10 +321,16 @@ By default, `ctx.log`, `ctx.metric` and `ctx.trace` are collected in memory and 
 ### Enable globally
 
 ```ts
-const chimpbase = await createChimpbase.from(import.meta.dir, {
+const app = defineChimpbaseApp({
+  project: { name: "telemetry-app" },
   telemetry: {
     persist: { log: true, metric: true, trace: true },
   },
+});
+
+const chimpbase = await createChimpbase({
+  app,
+  storage: { engine: "sqlite", path: "data/telemetry-app.db" },
 });
 ```
 
@@ -351,14 +375,15 @@ worker("fastWorker", handler, undefined, { telemetry: { trace: false } });
 Enable retention to automatically delete old telemetry stream events:
 
 ```ts
-telemetry: {
-  persist: { log: true, metric: true, trace: true },
-  retention: {
+const chimpbase = await createChimpbase({
+  app,
+  storage: { engine: "postgres", url: process.env.DATABASE_URL! },
+  telemetryRetention: {
     enabled: true,
-    maxAgeDays: 14,      // default: 30
-    schedule: "0 3 * * *", // default: "0 2 * * *" (daily at 2am UTC)
+    maxAgeDays: 14,         // default: 30
+    schedule: "0 3 * * *",  // default: "0 2 * * *" (daily at 2am UTC)
   },
-}
+});
 ```
 
 This registers an internal cron (`__chimpbase.telemetry.cleanup`) that runs on the configured schedule and deletes telemetry stream events older than `maxAgeDays`.

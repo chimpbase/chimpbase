@@ -3,8 +3,13 @@ import { access, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { normalizeProjectConfig } from "../packages/core/index.ts";
-import { createChimpbaseDeno } from "../packages/deno/src/library.ts";
+import {
+  defineChimpbaseApp,
+  defineChimpbaseMigration,
+  defineChimpbaseMigrations,
+  normalizeProjectConfig,
+} from "../packages/core/index.ts";
+import { createChimpbaseDeno, loadChimpbaseProject as loadChimpbaseDenoProject } from "../packages/deno/src/library.ts";
 import { ChimpbaseDenoHost } from "../packages/deno/src/runtime.ts";
 import {
   canUseDocker,
@@ -200,6 +205,147 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("createChimpbaseDeno accepts typed TS migrations", async () => {
+      const database = await postgres.createDatabase("deno_typed_migrations");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-typed-migrations-"));
+      cleanupDirs.push(projectDir);
+
+      installFakeDenoRuntime({
+        env: {},
+      });
+
+      const host = await createChimpbaseDeno({
+        migrations: defineChimpbaseMigrations({
+          postgres: [
+            defineChimpbaseMigration({
+              name: "001_worker_audit",
+              sql: "CREATE TABLE IF NOT EXISTS worker_audit (id SERIAL PRIMARY KEY, value TEXT NOT NULL);",
+            }),
+          ],
+        }),
+        project: { name: "deno-typed-migrations" },
+        projectDir,
+        storage: {
+          engine: "postgres",
+          url: database.url,
+        },
+        worker: {
+          retryDelayMs: 0,
+        },
+      });
+
+      host.registerAction("enqueueAudit", async (ctx, value) => {
+        await ctx.queue.enqueue("audit.job", { value });
+        return null;
+      });
+      host.registerAction(
+        "listAudit",
+        async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
+      );
+      host.registerWorker("audit.job", async (ctx, payload) => {
+        await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+      });
+
+      try {
+        await host.executeAction("enqueueAudit", ["typed-migration"]);
+
+        expect(await host.drain()).toEqual({
+          cronSchedules: 0,
+          idle: true,
+          queueJobs: 1,
+          runs: 1,
+          stopReason: "idle",
+        });
+
+        const audit = await host.executeAction("listAudit");
+        expect(audit.result).toEqual([{ value: "typed-migration" }]);
+      } finally {
+        host.close();
+      }
+    }, 30000);
+
+    test("createChimpbaseDeno accepts code-first app definitions with registrations", async () => {
+      const database = await postgres.createDatabase("deno_app_definition");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-app-definition-"));
+      cleanupDirs.push(projectDir);
+
+      installFakeDenoRuntime({
+        env: {},
+      });
+
+      const app = defineChimpbaseApp({
+        migrations: defineChimpbaseMigrations({
+          postgres: [
+            defineChimpbaseMigration({
+              name: "001_worker_audit",
+              sql: "CREATE TABLE IF NOT EXISTS worker_audit (id SERIAL PRIMARY KEY, value TEXT NOT NULL);",
+            }),
+          ],
+        }),
+        project: { name: "deno-app-definition" },
+        registrations: [
+          {
+            eventName: "audit.created",
+            handler: async (ctx, event) => {
+              await ctx.queue.enqueue("audit.job", event);
+            },
+            kind: "subscription",
+          },
+          {
+            handler: async (ctx, value) => {
+              ctx.pubsub.publish("audit.created", { value });
+              return { queued: value };
+            },
+            kind: "action",
+            name: "enqueueAudit",
+          },
+          {
+            handler: async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
+            kind: "action",
+            name: "listAudit",
+          },
+          {
+            definition: undefined,
+            handler: async (ctx, payload) => {
+              await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+            },
+            kind: "worker",
+            name: "audit.job",
+          },
+        ],
+      });
+
+      const host = await createChimpbaseDeno({
+        app,
+        projectDir,
+        storage: {
+          engine: "postgres",
+          url: database.url,
+        },
+        workerRuntime: {
+          pollIntervalMs: 25,
+        },
+      });
+
+      try {
+        const queued = await host.executeAction("enqueueAudit", ["from-app"]);
+        expect(queued.result).toEqual({ queued: "from-app" });
+
+        expect(await host.drain()).toEqual({
+          cronSchedules: 0,
+          idle: true,
+          queueJobs: 1,
+          runs: 1,
+          stopReason: "idle",
+        });
+
+        const audit = await host.executeAction("listAudit");
+        expect(audit.result).toEqual([{ value: "from-app" }]);
+      } finally {
+        host.close();
+      }
+    }, 30000);
+
     test("ChimpbaseDenoHost.load registers entrypoints and serves requests through Deno.serve", async () => {
       const database = await postgres.createDatabase("deno_load");
       const projectDir = await createDenoProjectFixture("load", database.url);
@@ -257,6 +403,70 @@ if (!dockerAvailable) {
 
         await started.stop();
         expect(shutdownCalled).toBe(true);
+      } finally {
+        host.close();
+      }
+    }, 30000);
+
+    test("loadChimpbaseProject prefers chimpbase.app.ts over legacy project discovery", async () => {
+      const database = await postgres.createDatabase("deno_app_module");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-app-module-"));
+      cleanupDirs.push(projectDir);
+
+      installFakeDenoRuntime({
+        env: {
+          DATABASE_URL: database.url,
+        },
+      });
+
+      await mkdir(resolve(projectDir, "node_modules/@chimpbase"), { recursive: true });
+      await cp(resolve(repoRoot, "packages/runtime"), resolve(projectDir, "node_modules/@chimpbase/runtime"), {
+        recursive: true,
+      });
+
+      await writeFile(
+        resolve(projectDir, "package.json"),
+        JSON.stringify(
+          {
+            dependencies: {
+              "@chimpbase/runtime": "file:./packages/runtime",
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        resolve(projectDir, "chimpbase.app.ts"),
+        [
+          'import { action } from "@chimpbase/runtime";',
+          "",
+          "export default {",
+          '  project: { name: "deno-app-module" },',
+          "  migrations: {",
+          "    postgres: [",
+          '      { name: "001_worker_audit", sql: "CREATE TABLE IF NOT EXISTS worker_audit (id SERIAL PRIMARY KEY, value TEXT NOT NULL);" },',
+          "    ],",
+          "  },",
+          "  registrations: [",
+          '    action("enqueueAudit", async (ctx, value) => {',
+          '      await ctx.queue.enqueue("audit.job", { value });',
+          "      return null;",
+          "    }),",
+          '    action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),',
+          '    { kind: "worker", name: "audit.job", handler: async (ctx, payload) => { await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload).value]); } },',
+          "  ],",
+          "};",
+        ].join("\n"),
+      );
+
+      const host = await loadChimpbaseDenoProject(projectDir);
+
+      try {
+        await host.executeAction("enqueueAudit", ["from-app-module"]);
+        await host.drain();
+        const audit = await host.executeAction("listAudit");
+        expect(audit.result).toEqual([{ value: "from-app-module" }]);
       } finally {
         host.close();
       }

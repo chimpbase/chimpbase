@@ -1,12 +1,18 @@
 import type {
   ChimpbaseActionHandler,
   ChimpbaseCronHandler,
+  ChimpbaseRegistration,
   ChimpbaseRouteHandler,
   ChimpbaseSubscriptionHandler,
   ChimpbaseWorkerDefinition,
   ChimpbaseWorkerHandler,
   ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
+import {
+  defineChimpbaseMigrations,
+  type ChimpbaseMigrationsDefinition,
+  type ChimpbaseMigrationsDefinitionInput,
+} from "./host.ts";
 
 export type ChimpbaseTelemetryPersistOverride =
   | boolean
@@ -76,22 +82,56 @@ export interface ChimpbaseProjectConfigInput {
   };
 }
 
-export interface ChimpbaseAppDefinition extends ChimpbaseProjectConfig {
-  entrypointPath: string;
-  migrations: {
-    dir: string | null;
-    sql: string[];
-  };
-  projectDir: string;
+export interface ChimpbaseAppWorkerConfig {
+  maxAttempts: number;
+  retryDelayMs: number;
 }
 
-export interface ChimpbaseAppDefinitionInput extends ChimpbaseProjectConfigInput {
-  entrypointPath: string;
-  migrations?: {
-    dir?: string;
-    sql?: string[];
+export interface ChimpbaseAppWorkerConfigInput {
+  maxAttempts?: number;
+  retryDelayMs?: number;
+}
+
+export interface ChimpbaseAppTelemetryConfig {
+  minLevel: "debug" | "info" | "warn" | "error";
+  persist: { log: boolean; metric: boolean; trace: boolean };
+}
+
+export interface ChimpbaseAppTelemetryConfigInput {
+  minLevel?: "debug" | "info" | "warn" | "error";
+  persist?: { log?: boolean; metric?: boolean; trace?: boolean };
+}
+
+export interface ChimpbaseAppWorkflowConfig {
+  contractsDir: string | null;
+}
+
+export interface ChimpbaseAppWorkflowConfigInput {
+  contractsDir?: string | null;
+}
+
+export interface ChimpbaseAppDefinition {
+  httpHandler: ChimpbaseRouteHandler | null;
+  migrations: ChimpbaseMigrationsDefinition;
+  project: {
+    name: string;
   };
-  projectDir?: string;
+  registrations: readonly ChimpbaseRegistration[];
+  telemetry: ChimpbaseAppTelemetryConfig;
+  worker: ChimpbaseAppWorkerConfig;
+  workflows: ChimpbaseAppWorkflowConfig;
+}
+
+export interface ChimpbaseAppDefinitionInput {
+  httpHandler?: ChimpbaseRouteHandler | { fetch: ChimpbaseRouteHandler } | null;
+  migrations?: ChimpbaseMigrationsDefinitionInput;
+  project?: {
+    name?: string;
+  };
+  registrations?: ReadonlyArray<ChimpbaseRegistration | readonly ChimpbaseRegistration[]>;
+  telemetry?: ChimpbaseAppTelemetryConfigInput;
+  worker?: ChimpbaseAppWorkerConfigInput;
+  workflows?: ChimpbaseAppWorkflowConfigInput;
 }
 
 export interface ChimpbaseWorkerRegistration {
@@ -189,13 +229,27 @@ export function defineChimpbaseApp(
   input: ChimpbaseAppDefinitionInput,
 ): ChimpbaseAppDefinition {
   return {
-    ...normalizeProjectConfig(input),
-    entrypointPath: input.entrypointPath,
-    migrations: {
-      dir: input.migrations?.dir ?? null,
-      sql: input.migrations?.sql ?? [],
+    httpHandler: normalizeHttpHandler(input.httpHandler),
+    migrations: defineChimpbaseMigrations(input.migrations),
+    project: {
+      name: input.project?.name ?? "chimpbase-app",
     },
-    projectDir: input.projectDir ?? ".",
+    registrations: normalizeRegistrations(input.registrations),
+    telemetry: {
+      minLevel: input.telemetry?.minLevel ?? "debug",
+      persist: {
+        log: input.telemetry?.persist?.log ?? false,
+        metric: input.telemetry?.persist?.metric ?? false,
+        trace: input.telemetry?.persist?.trace ?? false,
+      },
+    },
+    worker: {
+      maxAttempts: input.worker?.maxAttempts ?? 5,
+      retryDelayMs: input.worker?.retryDelayMs ?? 1_000,
+    },
+    workflows: {
+      contractsDir: input.workflows?.contractsDir ?? "workflow-contracts",
+    },
   };
 }
 
@@ -236,7 +290,34 @@ export {
   type ChimpbaseDrainOptions,
   type ChimpbaseDrainResult,
   type ChimpbaseMigration,
+  defineChimpbaseMigration,
   type ChimpbaseMigrationSource,
+  defineChimpbaseMigrations,
+  listChimpbaseMigrationsForEngine,
+  type ChimpbaseMigrationsDefinition,
+  type ChimpbaseMigrationsDefinitionInput,
+  type ChimpbaseMigrationEngine,
   type ChimpbasePlatformShim,
   type ChimpbaseSecretsSource,
+  type ChimpbaseStorageEngine,
 } from "./host.ts";
+
+function normalizeRegistrations(
+  registrations: ReadonlyArray<ChimpbaseRegistration | readonly ChimpbaseRegistration[]> | undefined,
+): readonly ChimpbaseRegistration[] {
+  return (registrations ?? []).flatMap((entryOrGroup) => Array.isArray(entryOrGroup) ? entryOrGroup : [entryOrGroup]);
+}
+
+function normalizeHttpHandler(
+  input: ChimpbaseRouteHandler | { fetch: ChimpbaseRouteHandler } | null | undefined,
+): ChimpbaseRouteHandler | null {
+  if (!input) {
+    return null;
+  }
+
+  if (typeof input === "function") {
+    return input;
+  }
+
+  return input.fetch.bind(input);
+}

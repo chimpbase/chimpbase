@@ -3,7 +3,12 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { normalizeProjectConfig } from "../packages/core/index.ts";
+import {
+  defineChimpbaseApp,
+  defineChimpbaseMigration,
+  defineChimpbaseMigrations,
+  normalizeProjectConfig,
+} from "../packages/core/index.ts";
 import { createChimpbase } from "../packages/bun/src/library.ts";
 import { ChimpbaseBunHost } from "../packages/bun/src/runtime.ts";
 
@@ -159,6 +164,137 @@ describe("chimpbase-bun runtime", () => {
 
       const audit = await host.executeAction("listAudit");
       expect(audit.result).toEqual([{ value: "delayed-job" }]);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("accepts typed TS migrations in createChimpbase options", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-typed-migrations-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      migrations: defineChimpbaseMigrations({
+        sqlite: [
+          defineChimpbaseMigration({
+            name: "001_worker_audit",
+            sql: "CREATE TABLE IF NOT EXISTS worker_audit (id INTEGER PRIMARY KEY, value TEXT NOT NULL);",
+          }),
+        ],
+      }),
+      project: { name: "typed-migrations" },
+      projectDir,
+      storage: {
+        engine: "sqlite",
+        path: "data/typed-migrations.db",
+      },
+      worker: {
+        retryDelayMs: 0,
+      },
+    });
+
+    host.registerAction("enqueueAudit", async (ctx, value) => {
+      await ctx.queue.enqueue("audit.job", { value });
+      return null;
+    });
+    host.registerAction(
+      "listAudit",
+      async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
+    );
+    host.registerWorker("audit.job", async (ctx, payload) => {
+      await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+    });
+
+    try {
+      await host.executeAction("enqueueAudit", ["typed-migration"]);
+
+      expect(await host.drain()).toEqual({
+        cronSchedules: 0,
+        idle: true,
+        queueJobs: 1,
+        runs: 1,
+        stopReason: "idle",
+      });
+
+      const audit = await host.executeAction("listAudit");
+      expect(audit.result).toEqual([{ value: "typed-migration" }]);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("accepts code-first app definitions with registrations", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-app-definition-"));
+    cleanupDirs.push(projectDir);
+
+    const app = defineChimpbaseApp({
+      migrations: defineChimpbaseMigrations({
+        sqlite: [
+          defineChimpbaseMigration({
+            name: "001_worker_audit",
+            sql: "CREATE TABLE IF NOT EXISTS worker_audit (id INTEGER PRIMARY KEY, value TEXT NOT NULL);",
+          }),
+        ],
+      }),
+      project: { name: "app-definition" },
+      registrations: [
+        {
+          eventName: "audit.created",
+          handler: async (ctx, event) => {
+            await ctx.queue.enqueue("audit.job", event);
+          },
+          kind: "subscription",
+        },
+        {
+          handler: async (ctx, value) => {
+            ctx.pubsub.publish("audit.created", { value });
+            return { queued: value };
+          },
+          kind: "action",
+          name: "enqueueAudit",
+        },
+        {
+          handler: async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
+          kind: "action",
+          name: "listAudit",
+        },
+        {
+          definition: undefined,
+          handler: async (ctx, payload) => {
+            await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+          },
+          kind: "worker",
+          name: "audit.job",
+        },
+      ],
+    });
+
+    const host = await createChimpbase({
+      app,
+      projectDir,
+      storage: {
+        engine: "sqlite",
+        path: "data/app-definition.db",
+      },
+      workerRuntime: {
+        pollIntervalMs: 25,
+      },
+    });
+
+    try {
+      const queued = await host.executeAction("enqueueAudit", ["from-app"]);
+      expect(queued.result).toEqual({ queued: "from-app" });
+
+      expect(await host.drain()).toEqual({
+        cronSchedules: 0,
+        idle: true,
+        queueJobs: 1,
+        runs: 1,
+        stopReason: "idle",
+      });
+
+      const audit = await host.executeAction("listAudit");
+      expect(audit.result).toEqual([{ value: "from-app" }]);
     } finally {
       host.close();
     }
@@ -1177,6 +1313,45 @@ describe("chimpbase-bun runtime", () => {
 
     host.close();
   });
+
+  test("createChimpbase.from prefers chimpbase.app.ts over legacy project discovery", async () => {
+    const projectDir = await createInlineFixture("app-module", {
+      "chimpbase.app.ts": [
+        'import { action } from "@chimpbase/runtime";',
+        "",
+        "export default {",
+        '  project: { name: "app-module" },',
+        "  migrations: {",
+        "    sqlite: [",
+        '      { name: "001_init", sql: "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, value TEXT NOT NULL);" },',
+        "    ],",
+        "  },",
+        "  registrations: [",
+        '    action("createNote", async (ctx, value) => {',
+        '      await ctx.query("INSERT INTO notes (value) VALUES (?1)", [value]);',
+        "      return null;",
+        "    }),",
+        '    action("listNotes", async (ctx) => await ctx.query("SELECT value FROM notes ORDER BY id ASC")),',
+        "  ],",
+        "};",
+      ].join("\n"),
+    }, []);
+
+    const host = await createChimpbase.from(projectDir, {
+      storage: {
+        engine: "sqlite",
+        path: "data/app-module.db",
+      },
+    });
+
+    try {
+      await host.executeAction("createNote", ["from-app-module"]);
+      const notes = await host.executeAction("listNotes");
+      expect(notes.result).toEqual([{ value: "from-app-module" }]);
+    } finally {
+      host.close();
+    }
+  });
 });
 
 async function createFixture(label: string): Promise<string> {
@@ -1341,7 +1516,9 @@ async function createInlineFixture(
   }
 
   await mkdir(resolve(dir, "data"), { recursive: true });
-  await writeFile(resolve(dir, "chimpbase.toml"), configLines.join("\n"));
+  if (configLines.length > 0) {
+    await writeFile(resolve(dir, "chimpbase.toml"), configLines.join("\n"));
+  }
 
   return dir;
 }

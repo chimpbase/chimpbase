@@ -3,8 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
+import { loadProjectAppDefinition } from "../packages/tooling/src/app.ts";
 import { loadProjectConfig } from "../packages/tooling/src/config.ts";
 import {
+  loadProjectMigrations,
+  loadProjectPostgresMigrations,
   readSqlMigrations,
   resolveLocalMigrationsDir,
   resolvePostgresMigrationsDir,
@@ -145,7 +148,7 @@ describe("@chimpbase/tooling", () => {
     await writeFile(resolve(projectDir, "migrations/sqlite/002_second.sql"), "SELECT 2;");
     await writeFile(resolve(projectDir, "migrations/sqlite/001_first.sql"), "SELECT 1;");
 
-    const migrationsDir = await resolveLocalMigrationsDir(resolve(projectDir, "migrations"), "sqlite");
+    const migrationsDir = await resolveLocalMigrationsDir(resolve(projectDir, "migrations"), "memory");
     const migrations = await readSqlMigrations(migrationsDir);
 
     expect(migrationsDir).toBe(resolve(projectDir, "migrations/sqlite"));
@@ -170,6 +173,68 @@ describe("@chimpbase/tooling", () => {
 
     expect(await resolvePostgresMigrationsDir(postgresProjectDir)).toBe(resolve(postgresProjectDir, "migrations/postgres"));
     expect(await resolvePostgresMigrationsDir(baseProjectDir)).toBe(resolve(baseProjectDir, "migrations"));
+  });
+
+  test("prefers chimpbase.migrations.ts over local SQL files", async () => {
+    const projectDir = await createTempDir("typed-migrations");
+    await mkdir(resolve(projectDir, "migrations/sqlite"), { recursive: true });
+    await mkdir(resolve(projectDir, "migrations/postgres"), { recursive: true });
+    await writeFile(resolve(projectDir, "migrations/sqlite/001_disk.sql"), "SELECT 'disk-sqlite';");
+    await writeFile(resolve(projectDir, "migrations/postgres/001_disk.sql"), "SELECT 'disk-postgres';");
+    await writeFile(
+      resolve(projectDir, "chimpbase.migrations.ts"),
+      [
+        "export default {",
+        "  sqlite: [",
+        "    { name: \"001_inline\", sql: \"SELECT 'sqlite-inline';\" },",
+        "    { name: \"002_inline\", sql: \"SELECT 'sqlite-inline-2';\" },",
+        "  ],",
+        "  postgres: [",
+        "    { name: \"001_pg_inline\", sql: \"SELECT 'postgres-inline';\" },",
+        "  ],",
+        "};",
+      ].join("\n"),
+    );
+
+    const sqliteMigrations = await loadProjectMigrations(projectDir, "memory");
+    const postgresMigrations = await loadProjectPostgresMigrations(projectDir);
+
+    expect(sqliteMigrations).toEqual([
+      { name: "001_inline", sql: "SELECT 'sqlite-inline';" },
+      { name: "002_inline", sql: "SELECT 'sqlite-inline-2';" },
+    ]);
+    expect(postgresMigrations).toEqual([
+      { name: "001_pg_inline", sql: "SELECT 'postgres-inline';" },
+    ]);
+  });
+
+  test("loads chimpbase.app.ts as the canonical code-first app definition", async () => {
+    const projectDir = await createTempDir("app-module");
+    await writeFile(
+      resolve(projectDir, "chimpbase.app.ts"),
+      [
+        "export default {",
+        '  project: { name: "tooling-app" },',
+        "  migrations: {",
+        "    sqlite: [",
+        '      { name: "001_init", sql: "SELECT 1;" },',
+        "    ],",
+        "  },",
+        "  registrations: [",
+        '    { kind: "action", name: "ping", handler: async () => "pong" },',
+        "  ],",
+        "};",
+      ].join("\n"),
+    );
+
+    const app = await loadProjectAppDefinition(projectDir);
+
+    expect(app).not.toBeNull();
+    expect(app?.project.name).toBe("tooling-app");
+    expect(app?.registrations).toHaveLength(1);
+    expect(app?.migrations.sqlite).toEqual([
+      { name: "001_init", sql: "SELECT 1;" },
+    ]);
   });
 });
 

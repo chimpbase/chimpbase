@@ -1,9 +1,23 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
-import type { ChimpbaseMigration, ChimpbaseProjectConfig } from "@chimpbase/core";
+import {
+  defineChimpbaseMigrations,
+  listChimpbaseMigrationsForEngine,
+  type ChimpbaseMigration,
+  type ChimpbaseMigrationsDefinition,
+  type ChimpbaseProjectConfig,
+} from "@chimpbase/core";
 
 export interface SqlMigration extends ChimpbaseMigration {}
+
+const PROJECT_MIGRATIONS_MODULE_CANDIDATES = [
+  "chimpbase.migrations.ts",
+  "chimpbase.migrations.js",
+  "chimpbase.migrations.mts",
+  "chimpbase.migrations.mjs",
+] as const;
 
 export async function resolveLocalMigrationsDir(
   migrationsDir: string | null,
@@ -13,7 +27,7 @@ export async function resolveLocalMigrationsDir(
     return null;
   }
 
-  const engineDir = resolve(migrationsDir, engine);
+  const engineDir = resolve(migrationsDir, resolveMigrationDialect(engine));
   return await directoryHasSqlFiles(engineDir) ? engineDir : migrationsDir;
 }
 
@@ -52,6 +66,50 @@ export async function readSqlMigrations(migrationsDir: string | null): Promise<S
   );
 }
 
+export async function loadProjectMigrations(
+  projectDir: string,
+  engine: ChimpbaseProjectConfig["storage"]["engine"],
+  options: { migrationsDir?: string | null } = {},
+): Promise<SqlMigration[]> {
+  const definedMigrations = await loadProjectMigrationsDefinition(projectDir);
+  if (definedMigrations) {
+    return [...listChimpbaseMigrationsForEngine(definedMigrations, engine)];
+  }
+
+  return await readSqlMigrations(await resolveLocalMigrationsDir(
+    options.migrationsDir ?? resolve(projectDir, "migrations"),
+    engine,
+  ));
+}
+
+export async function loadProjectPostgresMigrations(
+  projectDir: string,
+  options: { migrationsDir?: string | null } = {},
+): Promise<SqlMigration[]> {
+  const definedMigrations = await loadProjectMigrationsDefinition(projectDir);
+  if (definedMigrations) {
+    return [...definedMigrations.postgres];
+  }
+
+  if (options.migrationsDir) {
+    return await readSqlMigrations(await resolveLocalMigrationsDir(options.migrationsDir, "postgres"));
+  }
+
+  return await readSqlMigrations(await resolvePostgresMigrationsDir(projectDir));
+}
+
+export async function loadProjectMigrationsDefinition(
+  projectDir: string,
+): Promise<ChimpbaseMigrationsDefinition | null> {
+  const modulePath = await resolveProjectMigrationsModulePath(projectDir);
+  if (!modulePath) {
+    return null;
+  }
+
+  const moduleExports = await import(pathToFileURL(modulePath).href);
+  return coerceProjectMigrationsDefinition(moduleExports, modulePath);
+}
+
 export async function directoryHasSqlFiles(path: string): Promise<boolean> {
   try {
     const entries = await readdir(path);
@@ -59,4 +117,87 @@ export async function directoryHasSqlFiles(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function resolveProjectMigrationsModulePath(projectDir: string): Promise<string | null> {
+  for (const candidate of PROJECT_MIGRATIONS_MODULE_CANDIDATES) {
+    const path = resolve(projectDir, candidate);
+    if (await fileExists(path)) {
+      return path;
+    }
+  }
+
+  return null;
+}
+
+function coerceProjectMigrationsDefinition(
+  moduleExports: Record<string, unknown>,
+  modulePath: string,
+): ChimpbaseMigrationsDefinition {
+  const candidate = moduleExports.default ?? moduleExports.migrations;
+  if (!candidate || typeof candidate !== "object") {
+    throw new Error(`project migrations module must export a default object or named "migrations": ${modulePath}`);
+  }
+
+  const definition = candidate as Record<string, unknown>;
+  return defineChimpbaseMigrations({
+    postgres: coerceMigrationList(definition.postgres, modulePath, "postgres"),
+    sqlite: coerceMigrationList(definition.sqlite, modulePath, "sqlite"),
+  });
+}
+
+function coerceMigrationList(
+  value: unknown,
+  modulePath: string,
+  engine: "postgres" | "sqlite",
+): readonly SqlMigration[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`project migrations for ${engine} must be an array: ${modulePath}`);
+  }
+
+  return value.map((entry, index) => coerceMigration(entry, modulePath, engine, index));
+}
+
+function coerceMigration(
+  value: unknown,
+  modulePath: string,
+  engine: "postgres" | "sqlite",
+  index: number,
+): SqlMigration {
+  if (!value || typeof value !== "object") {
+    throw new Error(`project migration ${engine}[${index}] must be an object: ${modulePath}`);
+  }
+
+  const migration = value as Record<string, unknown>;
+  if (typeof migration.name !== "string" || migration.name.length === 0) {
+    throw new Error(`project migration ${engine}[${index}] must define a non-empty name: ${modulePath}`);
+  }
+
+  if (typeof migration.sql !== "string") {
+    throw new Error(`project migration ${engine}[${index}] must define sql as a string: ${modulePath}`);
+  }
+
+  return {
+    name: migration.name,
+    sql: migration.sql,
+  };
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveMigrationDialect(
+  engine: ChimpbaseProjectConfig["storage"]["engine"],
+): "postgres" | "sqlite" {
+  return engine === "postgres" ? "postgres" : "sqlite";
 }

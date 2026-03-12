@@ -2,14 +2,20 @@ import { basename, join, resolve } from "node:path";
 
 import {
   defineChimpbaseApp,
+  defineChimpbaseMigrations,
   type ChimpbaseAppDefinition,
   type ChimpbaseAppDefinitionInput,
+  type ChimpbaseMigrationsDefinitionInput,
   normalizeProjectConfig,
   type ChimpbaseProjectConfigInput,
+  type ChimpbaseSecretsSource,
 } from "@chimpbase/core";
 import {
   type ChimpbaseRouteHandler,
 } from "@chimpbase/runtime";
+import {
+  loadProjectAppDefinition,
+} from "@chimpbase/tooling/app";
 import type {
   ChimpbaseSchemaSyncOptions,
   ChimpbaseSchemaSyncResult,
@@ -42,17 +48,47 @@ export interface StartedChimpbaseProject {
   stop(): Promise<void>;
 }
 
-export interface CreateChimpbaseOptions extends ChimpbaseProjectConfigInput {
-  httpHandler?: ChimpbaseRouteHandler | { fetch: ChimpbaseRouteHandler };
-  migrations?: {
-    dir?: string;
-    sql?: string[];
+export interface CreateChimpbaseFromAppOptions {
+  app: ChimpbaseAppDefinition;
+  migrationsDir?: string;
+  migrationsSql?: string[];
+  projectDir?: string;
+  secrets?: ChimpbaseSecretsSource;
+  server?: {
+    port?: number;
   };
+  storage?: {
+    engine?: "memory" | "postgres" | "sqlite";
+    path?: string | null;
+    url?: string | null;
+  };
+  telemetryRetention?: {
+    enabled?: boolean;
+    maxAgeDays?: number;
+    schedule?: string;
+  };
+  workerRuntime?: {
+    leaseMs?: number;
+    pollIntervalMs?: number;
+  };
+}
+
+export interface CreateChimpbaseLegacyOptions extends ChimpbaseProjectConfigInput {
+  httpHandler?: ChimpbaseRouteHandler | { fetch: ChimpbaseRouteHandler };
+  migrations?: ChimpbaseMigrationsDefinitionInput;
+  migrationsDir?: string;
+  migrationsSql?: string[];
   modules?: object[];
   projectDir?: string;
 }
 
-export interface CreateChimpbaseWithDefaultsOptions extends Omit<CreateChimpbaseOptions, "projectDir"> {}
+export type CreateChimpbaseOptions = CreateChimpbaseFromAppOptions | CreateChimpbaseLegacyOptions;
+type CreateChimpbaseFromAppWithDefaultsOptions = Omit<CreateChimpbaseFromAppOptions, "projectDir">;
+type CreateChimpbaseLegacyWithDefaultsOptions = Omit<CreateChimpbaseLegacyOptions, "projectDir">;
+export type CreateChimpbaseWithDefaultsOptions =
+  | CreateChimpbaseFromAppWithDefaultsOptions
+  | CreateChimpbaseLegacyWithDefaultsOptions;
+export type LoadChimpbaseAppOptions = Omit<CreateChimpbaseFromAppOptions, "app">;
 
 export interface SyncChimpbaseWorkflowContractsOptions extends WorkflowContractSyncOptions {
   projectDir?: string;
@@ -63,25 +99,32 @@ export interface SyncChimpbaseSchemaOptions extends ChimpbaseSchemaSyncOptions {
 }
 
 export async function loadChimpbaseProject(projectDir = "."): Promise<ChimpbaseBunHost> {
-  return await ChimpbaseBunHost.load(resolve(projectDir));
+  const resolvedProjectDir = resolve(projectDir);
+  const app = await loadProjectAppDefinition(resolvedProjectDir);
+  if (app) {
+    return await loadChimpbaseApp(app, { projectDir: resolvedProjectDir });
+  }
+
+  return await ChimpbaseBunHost.load(resolvedProjectDir);
 }
 
 export async function loadChimpbaseApp(
-  definition: ChimpbaseAppDefinition,
+  app: ChimpbaseAppDefinition,
+  options: LoadChimpbaseAppOptions = {},
 ): Promise<ChimpbaseBunHost> {
-  const projectDir = resolve(definition.projectDir);
-  return await ChimpbaseBunHost.create({
-    config: definition,
-    entrypointPath: resolve(projectDir, definition.entrypointPath),
-    migrationsDir: definition.migrations.dir ? resolve(projectDir, definition.migrations.dir) : null,
-    migrationsSql: definition.migrations.sql,
-    projectDir,
+  return await createChimpbaseImpl({
+    ...options,
+    app,
   });
 }
 
 async function createChimpbaseImpl(
   options: CreateChimpbaseOptions = {},
 ): Promise<ChimpbaseBunHost> {
+  if (isCreateChimpbaseFromAppOptions(options)) {
+    return await createChimpbaseFromApp(options);
+  }
+
   const projectDir = resolve(options.projectDir ?? ".");
   const storageEngine = inferStorageEngine(options);
   const config = normalizeProjectConfig({
@@ -118,8 +161,9 @@ async function createChimpbaseImpl(
   });
   const host = await ChimpbaseBunHost.create({
     config,
-    migrationsDir: resolve(projectDir, options.migrations?.dir ?? Bun.env.CHIMPBASE_MIGRATIONS_DIR ?? "migrations"),
-    migrationsSql: options.migrations?.sql,
+    migrations: defineChimpbaseMigrations(options.migrations),
+    migrationsDir: inferMigrationsDir(projectDir, options.migrationsDir ?? Bun.env.CHIMPBASE_MIGRATIONS_DIR, options),
+    migrationsSql: options.migrationsSql,
     projectDir,
   });
 
@@ -142,9 +186,17 @@ async function createChimpbaseFrom(
   projectDir: string,
   options: CreateChimpbaseWithDefaultsOptions = {},
 ): Promise<ChimpbaseBunHost> {
+  const resolvedProjectDir = resolve(projectDir);
+  if (!isCreateChimpbaseFromAppOptions(options)) {
+    const app = await loadProjectAppDefinition(resolvedProjectDir);
+    if (app) {
+      return await createChimpbaseImpl(buildLoadedAppCreateOptions(app, resolvedProjectDir, options));
+    }
+  }
+
   return await createChimpbaseImpl({
     ...options,
-    projectDir,
+    projectDir: resolvedProjectDir,
   });
 }
 
@@ -196,18 +248,19 @@ export async function syncChimpbaseSchema(
 }
 
 export async function startChimpbaseApp(
-  options: ChimpbaseAppDefinition & Pick<StartChimpbaseProjectOptions, "serve" | "runWorker">,
+  options: CreateChimpbaseFromAppOptions & Pick<StartChimpbaseProjectOptions, "serve" | "runWorker">,
 ): Promise<StartedChimpbaseProject> {
-  const host = await loadChimpbaseApp(options);
+  const host = await loadChimpbaseApp(options.app, options);
   return startLoadedHost(host, options.serve, options.runWorker);
 }
 
 export async function runChimpbaseAppAction(
-  options: ChimpbaseAppDefinition,
+  app: ChimpbaseAppDefinition,
   actionName: string,
   args: unknown[] = [],
+  options: LoadChimpbaseAppOptions = {},
 ): Promise<{ host: ChimpbaseBunHost; outcome: ActionExecutionResult }> {
-  const host = await loadChimpbaseApp(options);
+  const host = await loadChimpbaseApp(app, options);
 
   try {
     const outcome = await host.executeAction(actionName, args);
@@ -224,6 +277,58 @@ export {
   type ChimpbaseAppDefinitionInput,
 };
 
+async function createChimpbaseFromApp(
+  options: CreateChimpbaseFromAppOptions,
+): Promise<ChimpbaseBunHost> {
+  const projectDir = resolve(options.projectDir ?? ".");
+  const storageEngine = inferStorageEngine(options);
+  const config = normalizeProjectConfig({
+    project: {
+      name: options.app.project.name,
+    },
+    server: {
+      port: options.server?.port ?? inferServerPort(),
+    },
+    storage: {
+      engine: storageEngine,
+      path: storageEngine === "memory" || storageEngine === "postgres"
+        ? null
+        : options.storage?.path
+          ?? Bun.env.CHIMPBASE_STORAGE_PATH
+          ?? join("data", `${options.app.project.name}.db`),
+      url: options.storage?.url
+        ?? Bun.env.CHIMPBASE_DATABASE_URL
+        ?? Bun.env.DATABASE_URL
+        ?? null,
+    },
+    telemetry: {
+      minLevel: options.app.telemetry.minLevel,
+      persist: options.app.telemetry.persist,
+      retention: options.telemetryRetention,
+    },
+    worker: {
+      leaseMs: options.workerRuntime?.leaseMs ?? inferNumberEnv("CHIMPBASE_WORKER_LEASE_MS"),
+      maxAttempts: options.app.worker.maxAttempts,
+      pollIntervalMs: options.workerRuntime?.pollIntervalMs ?? inferNumberEnv("CHIMPBASE_WORKER_POLL_INTERVAL_MS"),
+      retryDelayMs: options.app.worker.retryDelayMs,
+    },
+    workflows: {
+      contractsDir: options.app.workflows.contractsDir ?? undefined,
+    },
+  });
+  const host = await ChimpbaseBunHost.create({
+    config,
+    migrations: options.app.migrations,
+    migrationsDir: inferMigrationsDir(projectDir, options.migrationsDir ?? Bun.env.CHIMPBASE_MIGRATIONS_DIR, options),
+    migrationsSql: options.migrationsSql,
+    projectDir,
+    secrets: options.secrets,
+  });
+
+  applyChimpbaseApp(host, options.app);
+  return host;
+}
+
 function inferProjectName(projectDir: string): string {
   if (Bun.env.CHIMPBASE_PROJECT_NAME) {
     return Bun.env.CHIMPBASE_PROJECT_NAME;
@@ -239,7 +344,7 @@ function inferServerPort(): number {
   return Number.isFinite(port) ? port : 3000;
 }
 
-function inferStorageEngine(options: CreateChimpbaseOptions): "memory" | "postgres" | "sqlite" {
+function inferStorageEngine(options: Pick<CreateChimpbaseLegacyOptions, "storage"> | Pick<CreateChimpbaseFromAppOptions, "storage">): "memory" | "postgres" | "sqlite" {
   if (options.storage?.engine) {
     return options.storage.engine;
   }
@@ -263,6 +368,62 @@ function inferNumberEnv(name: string): number | undefined {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function inferMigrationsDir(
+  projectDir: string,
+  configuredDir: string | undefined,
+  options: CreateChimpbaseOptions,
+): string | null {
+  if (configuredDir) {
+    return resolve(projectDir, configuredDir);
+  }
+
+  if (
+    isCreateChimpbaseFromAppOptions(options)
+    || ("migrations" in options && options.migrations !== undefined)
+    || options.migrationsSql !== undefined
+  ) {
+    return null;
+  }
+
+  return resolve(projectDir, "migrations");
+}
+
+function applyChimpbaseApp(host: ChimpbaseBunHost, app: ChimpbaseAppDefinition): void {
+  if (app.registrations.length > 0) {
+    host.register(app.registrations);
+  }
+
+  host.setHttpHandler(app.httpHandler);
+}
+
+function isCreateChimpbaseFromAppOptions(
+  options: CreateChimpbaseOptions | CreateChimpbaseWithDefaultsOptions,
+): options is CreateChimpbaseFromAppOptions | CreateChimpbaseFromAppWithDefaultsOptions {
+  return "app" in options && options.app !== undefined;
+}
+
+function buildLoadedAppCreateOptions(
+  app: ChimpbaseAppDefinition,
+  projectDir: string,
+  options: CreateChimpbaseLegacyWithDefaultsOptions,
+): CreateChimpbaseFromAppOptions {
+  return {
+    app,
+    migrationsDir: "migrationsDir" in options ? options.migrationsDir : undefined,
+    migrationsSql: "migrationsSql" in options ? options.migrationsSql : undefined,
+    projectDir,
+    server: "server" in options ? options.server : undefined,
+    storage: "storage" in options ? options.storage : undefined,
+    telemetryRetention: "telemetry" in options ? options.telemetry?.retention : undefined,
+    workerRuntime: "worker" in options
+      ? {
+          leaseMs: options.worker?.leaseMs,
+          pollIntervalMs: options.worker?.pollIntervalMs,
+        }
+      : undefined,
+  };
 }
 
 function startLoadedHost(

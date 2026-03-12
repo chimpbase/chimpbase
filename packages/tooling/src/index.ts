@@ -1,3 +1,4 @@
+export * from "./app.ts";
 export * from "./cli.ts";
 export * from "./config.ts";
 export * from "./migrations.ts";

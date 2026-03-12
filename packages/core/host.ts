@@ -8,9 +8,22 @@ export interface ChimpbaseSecretsSource {
   get(name: string): string | null;
 }
 
+export type ChimpbaseStorageEngine = "memory" | "postgres" | "sqlite";
+export type ChimpbaseMigrationEngine = Exclude<ChimpbaseStorageEngine, "memory">;
+
 export interface ChimpbaseMigration {
   name: string;
   sql: string;
+}
+
+export interface ChimpbaseMigrationsDefinition {
+  postgres: readonly ChimpbaseMigration[];
+  sqlite: readonly ChimpbaseMigration[];
+}
+
+export interface ChimpbaseMigrationsDefinitionInput {
+  postgres?: readonly ChimpbaseMigration[];
+  sqlite?: readonly ChimpbaseMigration[];
 }
 
 export interface ChimpbaseMigrationSource {
@@ -52,6 +65,30 @@ export function createDefaultChimpbasePlatformShim(): ChimpbasePlatformShim {
   };
 }
 
+export function defineChimpbaseMigration(migration: ChimpbaseMigration): ChimpbaseMigration {
+  return {
+    name: migration.name,
+    sql: migration.sql,
+  };
+}
+
+export function defineChimpbaseMigrations(
+  input: ChimpbaseMigrationsDefinitionInput = {},
+): ChimpbaseMigrationsDefinition {
+  return {
+    postgres: normalizeMigrations(input.postgres),
+    sqlite: normalizeMigrations(input.sqlite),
+  };
+}
+
+export function listChimpbaseMigrationsForEngine(
+  definition: ChimpbaseMigrationsDefinitionInput | null | undefined,
+  engine: ChimpbaseStorageEngine,
+): readonly ChimpbaseMigration[] {
+  const normalized = defineChimpbaseMigrations(definition ?? {});
+  return engine === "postgres" ? normalized.postgres : normalized.sqlite;
+}
+
 function hashDeterministicString(input: string): string {
   let hash = DETERMINISTIC_HASH_OFFSET_BASIS;
 
@@ -61,4 +98,10 @@ function hashDeterministicString(input: string): string {
   }
 
   return hash.toString(16).padStart(16, "0");
+}
+
+function normalizeMigrations(
+  migrations: readonly ChimpbaseMigration[] | undefined,
+): readonly ChimpbaseMigration[] {
+  return (migrations ?? []).map((migration) => defineChimpbaseMigration(migration));
 }

@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/tooling",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Local tooling, config loading and CLI helpers for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -25,6 +25,7 @@
   ],
   "exports": {
     ".": "./src/index.ts",
+    "./app": "./src/app.ts",
     "./cli": "./src/cli.ts",
     "./config": "./src/config.ts",
     "./migrations": "./src/migrations.ts",

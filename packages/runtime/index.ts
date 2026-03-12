@@ -911,6 +911,12 @@ export function registerFrom(
   }
 }
 
+export function registrationsFrom(
+  ...sources: ChimpbaseDecoratedOwner[]
+): ChimpbaseRegistration[] {
+  return sources.flatMap((source) => collectDecoratedEntries(source));
+}
+
 /**
  * @deprecated Use register(target, ...entries) instead.
  */

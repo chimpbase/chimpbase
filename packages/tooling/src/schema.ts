@@ -4,8 +4,9 @@ import { join, resolve } from "node:path";
 import { PostgresDialect, Kysely, type ColumnMetadata, type TableMetadata } from "kysely";
 import { Pool } from "pg";
 
+import { loadProjectAppDefinition } from "./app.ts";
 import { loadProjectConfig } from "./config.ts";
-import { readSqlMigrations, resolvePostgresMigrationsDir } from "./migrations.ts";
+import { loadProjectPostgresMigrations } from "./migrations.ts";
 import { canUseDocker, startPostgresDocker } from "./postgres_docker.ts";
 
 interface SchemaEnumSnapshot {
@@ -64,7 +65,6 @@ export async function syncChimpbaseSchemaArtifacts(
   options: ChimpbaseSchemaSyncOptions = {},
 ): Promise<ChimpbaseSchemaSyncResult> {
   const projectDir = resolve(projectDirInput);
-  const config = await loadProjectConfig(projectDir);
   const outputDir = resolve(projectDir, options.outputDir ?? "db");
   const snapshotPath = join(outputDir, "schema.snapshot.json");
   const typesPath = join(outputDir, "schema.generated.ts");
@@ -92,7 +92,7 @@ export async function syncChimpbaseSchemaArtifacts(
 
     return {
       outputDir,
-      projectName: config.project.name,
+      projectName: await resolveProjectName(projectDir),
       snapshot,
       snapshotPath,
       status: "unchanged",
@@ -112,7 +112,7 @@ export async function syncChimpbaseSchemaArtifacts(
 
   return {
     outputDir,
-    projectName: config.project.name,
+    projectName: await resolveProjectName(projectDir),
     snapshot,
     snapshotPath,
     status: changed ? "written" : "unchanged",
@@ -180,7 +180,7 @@ async function prepareSchemaDatabase<TResult>(
   databaseUrl: string,
   callback: (databaseUrl: string) => Promise<TResult>,
 ): Promise<TResult> {
-  const migrations = await readSqlMigrations(await resolvePostgresMigrationsDir(projectDir));
+  const migrations = await loadProjectPostgresMigrations(projectDir);
   const pool = new Pool({
     connectionString: databaseUrl,
   });
@@ -194,6 +194,16 @@ async function prepareSchemaDatabase<TResult>(
   }
 
   return await callback(databaseUrl);
+}
+
+async function resolveProjectName(projectDir: string): Promise<string> {
+  const app = await loadProjectAppDefinition(projectDir);
+  if (app) {
+    return app.project.name;
+  }
+
+  const config = await loadProjectConfig(projectDir);
+  return config.project.name;
 }
 
 async function readEnums(pool: Pool): Promise<SchemaEnumSnapshot[]> {
