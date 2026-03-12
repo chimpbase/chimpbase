@@ -5,6 +5,7 @@
     "@chimpbase/core": "workspace:*",
     "@chimpbase/runtime": "workspace:*",
     "@chimpbase/bun": "workspace:*",
+    "@chimpbase/tooling": "workspace:*",
     "hono": "^4.12.5"
   },
   "scripts": {

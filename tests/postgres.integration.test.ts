@@ -462,6 +462,7 @@ async function createRuntimeFixture(label: string, databaseUrl: string): Promise
 
   await cp(resolve(exampleDir, "src"), resolve(dir, "src"), { recursive: true });
   await cp(resolve(exampleDir, "migrations"), resolve(dir, "migrations"), { recursive: true });
+  await cp(resolve(exampleDir, "chimpbase.migrations.ts"), resolve(dir, "chimpbase.migrations.ts"));
   await writeFile(
     resolve(dir, "index.ts"),
     [
@@ -510,6 +511,9 @@ async function createRuntimeFixture(label: string, databaseUrl: string): Promise
   );
   await writeFile(resolve(dir, "tsconfig.json"), await Bun.file(resolve(exampleDir, "tsconfig.json")).text());
   await mkdir(resolve(dir, "node_modules/@chimpbase"), { recursive: true });
+  await cp(resolve(runtimeRoot, "packages/core"), resolve(dir, "node_modules/@chimpbase/core"), {
+    recursive: true,
+  });
   await cp(resolve(runtimeRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
     recursive: true,
   });
@@ -521,6 +525,7 @@ async function createRuntimeFixture(label: string, databaseUrl: string): Promise
     JSON.stringify(
       {
         dependencies: {
+          "@chimpbase/core": "file:./packages/core",
           "@chimpbase/runtime": "file:./packages/runtime",
           hono: "^4.12.5",
           kysely: "^0.28.11",

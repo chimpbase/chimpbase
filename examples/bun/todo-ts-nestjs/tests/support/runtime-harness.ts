@@ -33,6 +33,7 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
 
   await cp(resolve(sourceProjectDir, "action.ts"), resolve(projectDir, "action.ts"));
   await cp(resolve(sourceProjectDir, "app.ts"), resolve(projectDir, "app.ts"));
+  await cp(resolve(sourceProjectDir, "chimpbase.migrations.ts"), resolve(projectDir, "chimpbase.migrations.ts"));
   await cp(resolve(sourceProjectDir, "tsconfig.json"), resolve(projectDir, "tsconfig.json"));
   await writeFile(
     resolve(projectDir, "package.json"),

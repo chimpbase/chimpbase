@@ -2,11 +2,12 @@ import { NestFactory } from "@nestjs/core";
 import "reflect-metadata";
 import {
   action,
-  worker,
   subscription,
+  worker,
 } from "@chimpbase/runtime";
-import { createChimpbase } from "@chimpbase/bun";
+import { createChimpbase, defineChimpbaseApp } from "@chimpbase/bun";
 
+import migrations from "./chimpbase.migrations.ts";
 import { AppModule } from "./src/nest/app.module.ts";
 import { todoApiApp } from "./src/http/app.ts";
 import {
@@ -27,36 +28,43 @@ export async function createTodoApplication() {
   const todoSubscriptions = nestApp.get(TodoSubscriptionsService);
   const todoWorkers = nestApp.get(TodoWorkersService);
 
-  const chimpbase = await createChimpbase.from(import.meta.dir, {
+  const app = defineChimpbaseApp({
     httpHandler: todoApiApp,
+    migrations,
+    project: {
+      name: "todo-ts-nestjs",
+    },
+    registrations: [
+      action("listProjects", projectActions.listProjects.bind(projectActions)),
+      action("createProject", projectActions.createProject.bind(projectActions)),
+      action("listTodos", todoActions.listTodos.bind(todoActions)),
+      action("createTodo", todoActions.createTodo.bind(todoActions)),
+      action("assignTodo", todoActions.assignTodo.bind(todoActions)),
+      action("startTodo", todoActions.startTodo.bind(todoActions)),
+      action("completeTodo", todoActions.completeTodo.bind(todoActions)),
+      action("getTodoDashboard", todoActions.getTodoDashboard.bind(todoActions)),
+      action("listTodoAuditLog", todoActions.listTodoAuditLog.bind(todoActions)),
+      action("listTodoEvents", todoActions.listTodoEvents.bind(todoActions)),
+      action("listTodoNotifications", todoActions.listTodoNotifications.bind(todoActions)),
+      subscription("todo.created", todoSubscriptions.auditTodoCreated.bind(todoSubscriptions)),
+      subscription("todo.assigned", todoSubscriptions.auditTodoAssigned.bind(todoSubscriptions)),
+      subscription("todo.started", todoSubscriptions.auditTodoStarted.bind(todoSubscriptions)),
+      subscription("todo.completed", todoSubscriptions.auditTodoCompleted.bind(todoSubscriptions)),
+      subscription("todo.completed", todoSubscriptions.enqueueTodoCompletedNotification.bind(todoSubscriptions)),
+      action("listWorkspacePreferences", todoActions.listWorkspacePreferences.bind(todoActions)),
+      action("setWorkspacePreference", todoActions.setWorkspacePreference.bind(todoActions)),
+      action("addTodoNote", todoActions.addTodoNote.bind(todoActions)),
+      action("listTodoNotes", todoActions.listTodoNotes.bind(todoActions)),
+      action("listTodoActivityStream", todoActions.listTodoActivityStream.bind(todoActions)),
+      worker("todo.completed.notify", todoWorkers.notifyTodoCompleted.bind(todoWorkers)),
+      worker("todo.completed.notify.dlq", todoWorkers.captureTodoCompletedDlq.bind(todoWorkers), { dlq: false }),
+      action("seedDemoWorkspace", todoActions.seedDemoWorkspace.bind(todoActions)),
+    ],
   });
-
-  chimpbase.register(
-    action("listProjects", projectActions.listProjects.bind(projectActions)),
-    action("createProject", projectActions.createProject.bind(projectActions)),
-    action("listTodos", todoActions.listTodos.bind(todoActions)),
-    action("createTodo", todoActions.createTodo.bind(todoActions)),
-    action("assignTodo", todoActions.assignTodo.bind(todoActions)),
-    action("startTodo", todoActions.startTodo.bind(todoActions)),
-    action("completeTodo", todoActions.completeTodo.bind(todoActions)),
-    action("getTodoDashboard", todoActions.getTodoDashboard.bind(todoActions)),
-    action("listTodoAuditLog", todoActions.listTodoAuditLog.bind(todoActions)),
-    action("listTodoEvents", todoActions.listTodoEvents.bind(todoActions)),
-    action("listTodoNotifications", todoActions.listTodoNotifications.bind(todoActions)),
-    subscription("todo.created", todoSubscriptions.auditTodoCreated.bind(todoSubscriptions)),
-    subscription("todo.assigned", todoSubscriptions.auditTodoAssigned.bind(todoSubscriptions)),
-    subscription("todo.started", todoSubscriptions.auditTodoStarted.bind(todoSubscriptions)),
-    subscription("todo.completed", todoSubscriptions.auditTodoCompleted.bind(todoSubscriptions)),
-    subscription("todo.completed", todoSubscriptions.enqueueTodoCompletedNotification.bind(todoSubscriptions)),
-    action("listWorkspacePreferences", todoActions.listWorkspacePreferences.bind(todoActions)),
-    action("setWorkspacePreference", todoActions.setWorkspacePreference.bind(todoActions)),
-    action("addTodoNote", todoActions.addTodoNote.bind(todoActions)),
-    action("listTodoNotes", todoActions.listTodoNotes.bind(todoActions)),
-    action("listTodoActivityStream", todoActions.listTodoActivityStream.bind(todoActions)),
-    worker("todo.completed.notify", todoWorkers.notifyTodoCompleted.bind(todoWorkers)),
-    worker("todo.completed.notify.dlq", todoWorkers.captureTodoCompletedDlq.bind(todoWorkers), { dlq: false }),
-    action("seedDemoWorkspace", todoActions.seedDemoWorkspace.bind(todoActions)),
-  );
+  const chimpbase = await createChimpbase({
+    app,
+    projectDir: import.meta.dir,
+  });
   return {
     chimpbase,
     close: async () => {

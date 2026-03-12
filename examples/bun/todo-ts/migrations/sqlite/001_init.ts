@@ -1,4 +1,8 @@
-CREATE TABLE IF NOT EXISTS projects (
+import { defineChimpbaseMigration } from "@chimpbase/core";
+
+export default defineChimpbaseMigration({
+  name: "001_init",
+  sql: `CREATE TABLE IF NOT EXISTS projects (
   id INTEGER PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
@@ -49,3 +53,5 @@ CREATE TABLE IF NOT EXISTS todo_notifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_todo_notifications_todo_id ON todo_notifications(todo_id);
+`,
+});
