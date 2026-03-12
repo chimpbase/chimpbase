@@ -44,6 +44,15 @@ interface CreateChimpbaseRuntimeOptions {
     path?: string | null;
     url?: string | null;
   };
+  subscriptions?: {
+    idempotency?: {
+      retention?: {
+        enabled?: boolean;
+        maxAgeDays?: number;
+        schedule?: string;
+      };
+    };
+  };
   telemetryRetention?: {
     enabled?: boolean;
     maxAgeDays?: number;
@@ -218,6 +227,11 @@ async function createChimpbaseDenoFromApp(
         ?? getDenoEnv("CHIMPBASE_DATABASE_URL")
         ?? getDenoEnv("DATABASE_URL")
         ?? null,
+    },
+    subscriptions: {
+      idempotency: {
+        retention: options.subscriptions?.idempotency?.retention,
+      },
     },
     telemetry: {
       minLevel: options.app.telemetry.minLevel,

@@ -111,6 +111,8 @@ export interface CreateHostOptions {
   secrets?: ChimpbaseSecretsSource;
 }
 
+const IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX = "_chimpbase.sub.seen:";
+
 export class ChimpbaseBunHost {
   readonly config: ChimpbaseProjectConfig;
   readonly engine: ChimpbaseEngine;
@@ -186,21 +188,7 @@ export class ChimpbaseBunHost {
       applyChimpbaseApp(host, options.app);
     }
 
-    if (options.config.telemetry.retention.enabled) {
-      host.registerCron(
-        "__chimpbase.telemetry.cleanup",
-        options.config.telemetry.retention.schedule,
-        async (ctx) => {
-          const cutoffMs = platform.now() - options.config.telemetry.retention.maxAgeDays * 86_400_000;
-          const cutoffTimestamp = new Date(cutoffMs).toISOString();
-          await ctx.query(
-            `DELETE FROM _chimpbase_stream_events WHERE stream_name IN ('_chimpbase.logs', '_chimpbase.metrics', '_chimpbase.traces') AND created_at < ?1`,
-            [cutoffTimestamp],
-          );
-        },
-      );
-      host.setTelemetryOverride("cron:__chimpbase.telemetry.cleanup", false);
-    }
+    registerInternalCleanupCrons(host, options.config, platform);
 
     return host;
   }
@@ -641,4 +629,67 @@ function createStaticMigrationSource(migrations: readonly ChimpbaseMigration[]):
       return [...migrations];
     },
   };
+}
+
+function registerInternalCleanupCrons(
+  host: ChimpbaseBunHost,
+  config: ChimpbaseProjectConfig,
+  platform: ChimpbasePlatformShim,
+): void {
+  if (config.telemetry.retention.enabled) {
+    host.registerCron(
+      "__chimpbase.telemetry.cleanup",
+      config.telemetry.retention.schedule,
+      async (ctx) => {
+        const cutoffMs = platform.now() - config.telemetry.retention.maxAgeDays * 86_400_000;
+        const cutoffTimestamp = new Date(cutoffMs).toISOString();
+        await ctx.query(
+          `DELETE FROM _chimpbase_stream_events WHERE stream_name IN ('_chimpbase.logs', '_chimpbase.metrics', '_chimpbase.traces') AND created_at < ?1`,
+          [cutoffTimestamp],
+        );
+      },
+    );
+    host.setTelemetryOverride("cron:__chimpbase.telemetry.cleanup", false);
+  }
+
+  if (config.subscriptions.idempotency.retention.enabled) {
+    host.registerCron(
+      "__chimpbase.subscription.idempotency.cleanup",
+      config.subscriptions.idempotency.retention.schedule,
+      async (ctx) => {
+        const cutoffMs = platform.now() - config.subscriptions.idempotency.retention.maxAgeDays * 86_400_000;
+        const keys = await ctx.kv.list({ prefix: IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX });
+
+        for (const key of keys) {
+          const [row] = await ctx.query<{ updated_at: unknown }>(
+            "SELECT updated_at FROM _chimpbase_kv WHERE key = ?1 LIMIT 1",
+            [key],
+          );
+          const updatedAtMs = parseDatabaseTimestampMs(row?.updated_at);
+          if (updatedAtMs !== null && updatedAtMs < cutoffMs) {
+            await ctx.kv.delete(key);
+          }
+        }
+      },
+    );
+    host.setTelemetryOverride("cron:__chimpbase.subscription.idempotency.cleanup", false);
+  }
+}
+
+function parseDatabaseTimestampMs(value: unknown): number | null {
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const withTimezone = /[zZ]|[+-]\d{2}(?::?\d{2})?$/.test(normalized)
+    ? normalized
+    : `${normalized}Z`;
+  const parsed = Date.parse(withTimezone);
+  return Number.isFinite(parsed) ? parsed : null;
 }

@@ -181,6 +181,180 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("processes an idempotent subscription only once when the same Postgres event id is re-polled", async () => {
+      const database = await postgres.createDatabase("idempotent_subscriptions");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-postgres-idempotent-"));
+      cleanupDirs.push(projectDir);
+
+      const migrationsSql = [
+        "CREATE TABLE IF NOT EXISTS idempotent_audit (id BIGSERIAL PRIMARY KEY, value TEXT NOT NULL);",
+      ];
+      const subscriber = await createChimpbase({
+        migrationsSql,
+        project: { name: "postgres-idempotent-subscriber" },
+        projectDir,
+        storage: { engine: "postgres", url: database.url },
+      });
+      const publisher = await createChimpbase({
+        migrationsSql,
+        project: { name: "postgres-idempotent-publisher" },
+        projectDir,
+        storage: { engine: "postgres", url: database.url },
+      });
+
+      subscriber.registerSubscription(
+        "audit.created",
+        async (ctx, payload) => {
+          await ctx.query("INSERT INTO idempotent_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+        },
+        { idempotent: true, name: "onAuditCreated" },
+      );
+      publisher.registerAction("publishAudit", async (ctx, value) => {
+        ctx.pubsub.publish("audit.created", { value });
+        return null;
+      });
+      publisher.registerAction(
+        "listAudit",
+        async (ctx) => await ctx.query("SELECT value FROM idempotent_audit ORDER BY id ASC"),
+      );
+      publisher.registerAction(
+        "listEvents",
+        async (ctx) => await ctx.query("SELECT id::double precision AS id, event_name FROM _chimpbase_events ORDER BY id ASC"),
+      );
+      publisher.registerAction(
+        "listSeenKeys",
+        async (ctx) =>
+          await ctx.query(
+            "SELECT key FROM _chimpbase_kv WHERE key LIKE ?1 ORDER BY key ASC",
+            ["_chimpbase.sub.seen:%"],
+          ),
+      );
+
+      const startedSubscriber = subscriber.start({ runWorker: false, serve: false });
+
+      try {
+        await Bun.sleep(100);
+        await publisher.executeAction("publishAudit", ["from-publisher"]);
+
+        const audit = await waitFor(async () => {
+          const outcome = await publisher.executeAction("listAudit");
+          return outcome.result as Array<{ value: string }>;
+        }, (rows) => rows.length === 1);
+        expect(audit).toEqual([{ value: "from-publisher" }]);
+
+        const events = await publisher.executeAction("listEvents");
+        expect(events.result).toEqual([
+          expect.objectContaining({ event_name: "audit.created", id: expect.any(Number) }),
+        ]);
+        const [event] = events.result as Array<{ event_name: string; id: number }>;
+
+        const seenKeys = await publisher.executeAction("listSeenKeys");
+        expect(seenKeys.result).toEqual([
+          { key: `_chimpbase.sub.seen:${event.id}:onAuditCreated` },
+        ]);
+
+        const subscriberEventBus = (subscriber.engine as any).eventBus as { lastSeenId: number };
+        subscriberEventBus.lastSeenId = 0;
+
+        await Bun.sleep(1_200);
+
+        const auditAfterReplay = await publisher.executeAction("listAudit");
+        expect(auditAfterReplay.result).toEqual([{ value: "from-publisher" }]);
+
+        const seenKeysAfterReplay = await publisher.executeAction("listSeenKeys");
+        expect(seenKeysAfterReplay.result).toEqual([
+          { key: `_chimpbase.sub.seen:${event.id}:onAuditCreated` },
+        ]);
+      } finally {
+        await startedSubscriber.stop();
+        publisher.close();
+        subscriber.close();
+      }
+    }, 30000);
+
+    test("prunes stale idempotent subscription markers through the internal retention cron", async () => {
+      const realDateNow = Date.now;
+      let now = Date.UTC(2026, 2, 12, 2, 59, 0);
+      Date.now = () => now;
+
+      const database = await postgres.createDatabase("idempotent_subscription_cleanup");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-postgres-idempotent-cleanup-"));
+      cleanupDirs.push(projectDir);
+
+      const subscriber = await createChimpbase({
+        project: { name: "postgres-idempotent-cleanup-subscriber" },
+        projectDir,
+        storage: { engine: "postgres", url: database.url },
+        subscriptions: {
+          idempotency: {
+            retention: {
+              enabled: true,
+              maxAgeDays: 7,
+              schedule: "0 3 * * *",
+            },
+          },
+        },
+      });
+      const publisher = await createChimpbase({
+        project: { name: "postgres-idempotent-cleanup-publisher" },
+        projectDir,
+        storage: { engine: "postgres", url: database.url },
+      });
+
+      subscriber.registerSubscription(
+        "audit.created",
+        async () => {},
+        { idempotent: true, name: "onAuditCreated" },
+      );
+      publisher.registerAction("publishAudit", async (ctx, value) => {
+        ctx.pubsub.publish("audit.created", { value });
+        return null;
+      });
+      publisher.registerAction(
+        "listSeenKeys",
+        async (ctx) => (await ctx.kv.list({ prefix: "_chimpbase.sub.seen:" })).map((key) => ({ key })),
+      );
+      publisher.registerAction("setSeenKey", async (ctx, key) => {
+        await ctx.kv.set(key as string, true);
+        return null;
+      });
+      publisher.registerAction("backdateSeenKey", async (ctx, key, updatedAt) => {
+        await ctx.query("UPDATE _chimpbase_kv SET updated_at = ?1 WHERE key = ?2", [updatedAt, key]);
+        return null;
+      });
+
+      const startedSubscriber = subscriber.start({ runWorker: false, serve: false });
+
+      try {
+        await Bun.sleep(100);
+        await publisher.executeAction("publishAudit", ["from-publisher"]);
+
+        const seenKeyRows = await waitFor(async () => {
+          const outcome = await publisher.executeAction("listSeenKeys");
+          return outcome.result as Array<{ key: string }>;
+        }, (rows) => rows.length === 1);
+        const staleMarkerKey = seenKeyRows[0]!.key;
+        const freshMarkerKey = "_chimpbase.sub.seen:manual:fresh";
+
+        await publisher.executeAction("setSeenKey", [freshMarkerKey]);
+        await publisher.executeAction("backdateSeenKey", [staleMarkerKey, "2026-03-01T00:00:00.000Z"]);
+
+        await subscriber.syncCronSchedules();
+
+        now = Date.UTC(2026, 2, 12, 3, 0, 0);
+        expect((await subscriber.processNextCronSchedule())?.scheduleName).toBe("__chimpbase.subscription.idempotency.cleanup");
+        expect((await subscriber.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+
+        const remainingKeys = await publisher.executeAction("listSeenKeys");
+        expect(remainingKeys.result).toEqual([{ key: freshMarkerKey }]);
+      } finally {
+        await startedSubscriber.stop();
+        publisher.close();
+        subscriber.close();
+        Date.now = realDateNow;
+      }
+    }, 30000);
+
     test("executes durable workflows via ChimpbaseBunHost.load on Postgres", async () => {
       const database = await postgres.createDatabase("workflow");
       const projectDir = await createWorkflowFixture("workflow", database.url);
@@ -464,6 +638,27 @@ function postgresEnv(databaseUrl: string): Record<string, string> {
     DATABASE_URL: databaseUrl,
     TODO_NOTIFIER_SENDER: "alerts@postgres.test",
   };
+}
+
+async function waitFor<T>(
+  load: () => Promise<T>,
+  predicate: (value: T) => boolean,
+  options: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<T> {
+  const intervalMs = options.intervalMs ?? 50;
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    const value = await load();
+    if (predicate(value)) {
+      return value;
+    }
+
+    await Bun.sleep(intervalMs);
+  }
+
+  throw new Error(`condition not met within ${timeoutMs}ms`);
 }
 
 async function createRuntimeFixture(label: string, databaseUrl: string): Promise<string> {

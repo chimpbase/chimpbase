@@ -31,6 +31,11 @@ export interface ChimpbaseProjectConfig {
     path: string | null;
     url: string | null;
   };
+  subscriptions: {
+    idempotency: {
+      retention: { enabled: boolean; maxAgeDays: number; schedule: string };
+    };
+  };
   telemetry: {
     minLevel: "debug" | "info" | "warn" | "error";
     persist: { log: boolean; metric: boolean; trace: boolean };
@@ -62,6 +67,11 @@ export interface ChimpbaseProjectConfigInput {
     engine?: "memory" | "postgres" | "sqlite";
     path?: string | null;
     url?: string | null;
+  };
+  subscriptions?: {
+    idempotency?: {
+      retention?: { enabled?: boolean; maxAgeDays?: number; schedule?: string };
+    };
   };
   worker?: {
     leaseMs?: number;
@@ -207,6 +217,15 @@ export function normalizeProjectConfig(
       engine: input.storage?.engine ?? "sqlite",
       path: input.storage?.path ?? null,
       url: input.storage?.url ?? null,
+    },
+    subscriptions: {
+      idempotency: {
+        retention: {
+          enabled: input.subscriptions?.idempotency?.retention?.enabled ?? false,
+          maxAgeDays: input.subscriptions?.idempotency?.retention?.maxAgeDays ?? 30,
+          schedule: input.subscriptions?.idempotency?.retention?.schedule ?? "0 2 * * *",
+        },
+      },
     },
     worker: {
       leaseMs: input.worker?.leaseMs ?? 30_000,

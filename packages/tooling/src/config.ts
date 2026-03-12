@@ -29,6 +29,9 @@ export async function loadProjectConfig(
   const storage = getTable(parsed, "storage");
   const worker = getTable(parsed, "worker");
   const secrets = getTable(parsed, "secrets");
+  const subscriptions = getTable(parsed, "subscriptions");
+  const subscriptionsIdempotency = getTable(subscriptions, "idempotency");
+  const subscriptionsIdempotencyRetention = getTable(subscriptionsIdempotency, "retention");
   const workflows = getTable(parsed, "workflows");
   const telemetry = getTable(parsed, "telemetry");
   const telemetryPersist = getTable(telemetry, "persist");
@@ -45,6 +48,15 @@ export async function loadProjectConfig(
       engine: readStorageEngine(storage),
       path: readNullableString(storage, "path"),
       url: readNullableString(storage, "url"),
+    },
+    subscriptions: {
+      idempotency: {
+        retention: {
+          enabled: readBoolean(subscriptionsIdempotencyRetention, "enabled"),
+          maxAgeDays: readNumber(subscriptionsIdempotencyRetention, "max_age_days"),
+          schedule: readString(subscriptionsIdempotencyRetention, "schedule"),
+        },
+      },
     },
     worker: {
       leaseMs: readNumber(worker, "lease_ms"),

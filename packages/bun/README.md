@@ -428,6 +428,22 @@ telemetry: {
 
 This registers an internal cron (`__chimpbase.telemetry.cleanup`) that runs on the configured schedule and deletes telemetry stream events older than `maxAgeDays`.
 
+Idempotent subscription markers can be pruned the same way:
+
+```ts
+subscriptions: {
+  idempotency: {
+    retention: {
+      enabled: true,
+      maxAgeDays: 14,        // default: 30
+      schedule: "15 2 * * *", // default: "0 2 * * *"
+    },
+  },
+}
+```
+
+This registers `__chimpbase.subscription.idempotency.cleanup`, which scans `_chimpbase.sub.seen:*` keys and deletes markers older than `maxAgeDays`.
+
 ## Distribution
 
 `@chimpbase/bun` is published as TypeScript source instead of a prebuilt `dist/` folder.

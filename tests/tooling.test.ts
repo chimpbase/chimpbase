@@ -39,6 +39,11 @@ describe("@chimpbase/tooling", () => {
         'engine = "postgres"',
         'url = "postgres://example.test/chimpbase"',
         "",
+        "[subscriptions.idempotency.retention]",
+        "enabled = true",
+        "max_age_days = 21",
+        'schedule = "15 2 * * *"',
+        "",
         "[worker]",
         "lease_ms = 45000",
         "max_attempts = 9",
@@ -76,6 +81,15 @@ describe("@chimpbase/tooling", () => {
       engine: "postgres",
       path: null,
       url: "postgres://example.test/chimpbase",
+    });
+    expect(config.subscriptions).toEqual({
+      idempotency: {
+        retention: {
+          enabled: true,
+          maxAgeDays: 21,
+          schedule: "15 2 * * *",
+        },
+      },
     });
     expect(config.worker).toEqual({
       leaseMs: 45000,
@@ -116,6 +130,11 @@ describe("@chimpbase/tooling", () => {
         secrets: { dir: "run/secrets", envFile: ".env" },
         server: { port: 3000 },
         storage: { engine: "memory", path: null, url: null },
+        subscriptions: {
+          idempotency: {
+            retention: { enabled: false, maxAgeDays: 30, schedule: "0 2 * * *" },
+          },
+        },
         telemetry: {
           minLevel: "debug",
           persist: { log: false, metric: false, trace: false },

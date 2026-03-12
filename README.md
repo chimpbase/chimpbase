@@ -197,6 +197,22 @@ subscription("order.created", handleOrderCreated, {
 
 When `idempotent: true`, the check and handler execution happen atomically inside the same DB transaction. A stable `name` is required so the deduplication marker is deterministic. Events without an `id` (local-only events) bypass the check automatically.
 
+If you want those deduplication markers pruned automatically:
+
+```ts
+subscriptions: {
+  idempotency: {
+    retention: {
+      enabled: true,
+      maxAgeDays: 14,        // default: 30
+      schedule: "15 2 * * *", // default: "0 2 * * *"
+    },
+  },
+}
+```
+
+This registers an internal cron (`__chimpbase.subscription.idempotency.cleanup`) that scans `_chimpbase.sub.seen:*` keys and deletes markers older than `maxAgeDays`.
+
 ### `queue.enqueue` + `worker`
 
 Use `queue.enqueue(...)` to dispatch durable jobs and `worker(...)` to process them.
