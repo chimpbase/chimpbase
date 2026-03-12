@@ -1,38 +1,31 @@
 {
-  "name": "@chimpbase/bun",
+  "name": "@chimpbase/deno",
   "version": "0.1.6",
-  "description": "Bun host for building action-driven backends on Postgres with minimal boilerplate.",
+  "description": "Deno CLI and self-hosted host for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chimpbase/chimpbase.git",
-    "directory": "packages/bun"
+    "directory": "packages/deno"
   },
   "homepage": "https://github.com/chimpbase/chimpbase#readme",
   "bugs": {
     "url": "https://github.com/chimpbase/chimpbase/issues"
   },
   "keywords": [
-    "bun",
+    "deno",
     "postgres",
     "typescript",
     "workflow",
-    "queue",
     "backend"
   ],
   "files": [
-    "src",
-    "README.md",
-    "LICENSE",
-    "NOTICE"
+    "src"
   ],
   "exports": {
     ".": "./src/library.ts",
     "./cli": "./src/cli.ts"
-  },
-  "bin": {
-    "chimpbase": "./src/cli.ts"
   },
   "publishConfig": {
     "access": "public"
@@ -45,8 +38,6 @@
     "kysely": "^0.28.11"
   },
   "devDependencies": {
-    "@types/node": "^24.6.1",
-    "bun-types": "^1.3.10",
     "typescript": "^5.9.3"
   }
 }

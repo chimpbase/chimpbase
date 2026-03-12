@@ -80,7 +80,7 @@
     },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
@@ -99,15 +99,29 @@
     },
     "packages/core": {
       "name": "@chimpbase/core",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "dependencies": {
         "@chimpbase/runtime": "workspace:^",
         "kysely": "^0.28.11",
       },
     },
+    "packages/deno": {
+      "name": "@chimpbase/deno",
+      "version": "0.1.6",
+      "dependencies": {
+        "@chimpbase/core": "workspace:^",
+        "@chimpbase/postgres": "workspace:^",
+        "@chimpbase/runtime": "workspace:^",
+        "@chimpbase/tooling": "workspace:^",
+        "kysely": "^0.28.11",
+      },
+      "devDependencies": {
+        "typescript": "^5.9.3",
+      },
+    },
     "packages/postgres": {
       "name": "@chimpbase/postgres",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "dependencies": {
         "@chimpbase/core": "workspace:^",
         "@chimpbase/runtime": "workspace:^",
@@ -121,14 +135,14 @@
     },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "dependencies": {
         "kysely": "^0.28.11",
       },
     },
     "packages/tooling": {
       "name": "@chimpbase/tooling",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "dependencies": {
         "@chimpbase/core": "workspace:^",
         "@chimpbase/runtime": "workspace:^",
@@ -143,6 +157,8 @@
     "@chimpbase/bun": ["@chimpbase/bun@workspace:packages/bun"],
 
     "@chimpbase/core": ["@chimpbase/core@workspace:packages/core"],
+
+    "@chimpbase/deno": ["@chimpbase/deno@workspace:packages/deno"],
 
     "@chimpbase/example-todo-ts": ["@chimpbase/example-todo-ts@workspace:examples/bun/todo-ts"],
 

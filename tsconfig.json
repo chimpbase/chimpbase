@@ -14,6 +14,7 @@
       "@chimpbase/core": ["./packages/core/index.ts"],
       "@chimpbase/runtime": ["./packages/runtime/index.ts"],
       "@chimpbase/bun": ["./packages/bun/src/library.ts"],
+      "@chimpbase/deno": ["./packages/deno/src/library.ts"],
       "@chimpbase/postgres": ["./packages/postgres/src/index.ts"],
       "@chimpbase/tooling": ["./packages/tooling/src/index.ts"],
       "@chimpbase/tooling/*": ["./packages/tooling/src/*"]
@@ -21,6 +22,7 @@
   },
   "include": [
     "packages/bun/**/*.ts",
+    "packages/deno/**/*.ts",
     "packages/postgres/**/*.ts",
     "packages/tooling/**/*.ts",
     "tests/**/*.ts",

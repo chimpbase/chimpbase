@@ -146,7 +146,7 @@ export async function runChimpbaseCli(
   }
 
   await started.stop();
-  throw new Error("bun host currently supports default mode, --serve, --worker or --action");
+  throw new Error("host currently supports default mode, --serve, --worker or --action");
 }
 
 function parseArgs(rawArgs: readonly string[]): Record<string, string | boolean> {

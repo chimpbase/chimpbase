@@ -1,0 +1,457 @@
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { access, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+
+import { normalizeProjectConfig } from "../packages/core/index.ts";
+import { createChimpbaseDeno } from "../packages/deno/src/library.ts";
+import { ChimpbaseDenoHost } from "../packages/deno/src/runtime.ts";
+import {
+  canUseDocker,
+  startPostgresDocker,
+  type PostgresDockerHandle,
+} from "../packages/tooling/src/postgres_docker.ts";
+
+interface FakeDenoRuntimeOptions {
+  env?: Record<string, string>;
+  serve?: (
+    options: { hostname?: string; port?: number },
+    handler: (request: Request) => Response | Promise<Response>,
+  ) => {
+    finished?: Promise<void>;
+    shutdown?(): void;
+  };
+}
+
+const repoRoot = resolve(import.meta.dir, "..");
+const dockerAvailable = await canUseDocker();
+const cleanupDirs: string[] = [];
+const originalDeno = Reflect.get(globalThis, "Deno");
+// SQLite for @chimpbase/deno is validated in a real Deno process because Bun is not the target runtime here.
+const bunSupportsBetterSqlite3 = false;
+
+afterEach(async () => {
+  restoreDenoRuntime();
+
+  while (cleanupDirs.length > 0) {
+    const dir = cleanupDirs.pop();
+    if (dir) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+if (!bunSupportsBetterSqlite3) {
+  test.skip("deno sqlite runtime is covered in a real Deno process", () => {});
+} else {
+  describe("chimpbase-deno sqlite runtime", () => {
+    test("createChimpbaseDeno.from defaults to sqlite storage and drains queue work", async () => {
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-sqlite-defaults-"));
+      cleanupDirs.push(projectDir);
+
+      installFakeDenoRuntime({
+        env: {
+          CHIMPBASE_PROJECT_NAME: "deno-sqlite-app",
+          CHIMPBASE_SERVER_PORT: "4814",
+          CHIMPBASE_WORKER_LEASE_MS: "41000",
+          CHIMPBASE_WORKER_MAX_ATTEMPTS: "4",
+          CHIMPBASE_WORKER_POLL_INTERVAL_MS: "25",
+          CHIMPBASE_WORKER_RETRY_DELAY_MS: "0",
+        },
+      });
+
+      const host = await createChimpbaseDeno.from(projectDir, {});
+      const processed: string[] = [];
+
+      host.registerAction("enqueueJobs", async (ctx) => {
+        await ctx.queue.enqueue("batch.job", { value: "job-1" });
+        await ctx.queue.enqueue("batch.job", { value: "job-2" });
+        return null;
+      });
+      host.registerWorker("batch.job", async (_ctx, payload) => {
+        processed.push((payload as { value: string }).value);
+      });
+
+      try {
+        expect(host.config.project.name).toBe("deno-sqlite-app");
+        expect(host.config.server.port).toBe(4814);
+        expect(host.config.storage).toEqual({
+          engine: "sqlite",
+          path: join("data", "deno-sqlite-app.db"),
+          url: null,
+        });
+        expect(host.config.worker).toEqual({
+          leaseMs: 41000,
+          maxAttempts: 4,
+          pollIntervalMs: 25,
+          retryDelayMs: 0,
+        });
+        await access(resolve(projectDir, host.config.storage.path!));
+
+        await host.executeAction("enqueueJobs");
+
+        const firstDrain = await host.drain({ maxRuns: 1 });
+        expect(firstDrain).toEqual({
+          cronSchedules: 0,
+          idle: false,
+          queueJobs: 1,
+          runs: 1,
+          stopReason: "max_runs",
+        });
+        expect(processed).toEqual(["job-1"]);
+
+        const secondDrain = await host.drain();
+        expect(secondDrain).toEqual({
+          cronSchedules: 0,
+          idle: true,
+          queueJobs: 1,
+          runs: 1,
+          stopReason: "idle",
+        });
+        expect(processed).toEqual(["job-1", "job-2"]);
+      } finally {
+        host.close();
+      }
+    });
+  });
+}
+
+if (!dockerAvailable) {
+  test.skip("deno runtime integration requires Docker", () => {});
+} else {
+  describe("chimpbase-deno runtime", () => {
+    let postgres: PostgresDockerHandle;
+
+    beforeAll(async () => {
+      postgres = await startPostgresDocker();
+    }, 30000);
+
+    afterAll(async () => {
+      await postgres?.stop();
+    }, 30000);
+
+    test("createChimpbaseDeno.from applies Deno env defaults and drains queue work", async () => {
+      const database = await postgres.createDatabase("deno_env_defaults");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-env-defaults-"));
+      cleanupDirs.push(projectDir);
+
+      installFakeDenoRuntime({
+        env: {
+          CHIMPBASE_PROJECT_NAME: "deno-env-app",
+          CHIMPBASE_SERVER_PORT: "4810",
+          CHIMPBASE_WORKER_LEASE_MS: "41000",
+          CHIMPBASE_WORKER_MAX_ATTEMPTS: "6",
+          CHIMPBASE_WORKER_POLL_INTERVAL_MS: "25",
+          CHIMPBASE_WORKER_RETRY_DELAY_MS: "0",
+          DATABASE_URL: database.url,
+        },
+      });
+
+      const host = await createChimpbaseDeno.from(projectDir, {});
+      const processed: string[] = [];
+
+      host.registerAction("enqueueJobs", async (ctx) => {
+        await ctx.queue.enqueue("batch.job", { value: "job-1" });
+        await ctx.queue.enqueue("batch.job", { value: "job-2" });
+        return null;
+      });
+      host.registerWorker("batch.job", async (_ctx, payload) => {
+        processed.push((payload as { value: string }).value);
+      });
+
+      try {
+        expect(host.config.project.name).toBe("deno-env-app");
+        expect(host.config.server.port).toBe(4810);
+        expect(host.config.storage).toEqual({
+          engine: "postgres",
+          path: null,
+          url: database.url,
+        });
+        expect(host.config.worker).toEqual({
+          leaseMs: 41000,
+          maxAttempts: 6,
+          pollIntervalMs: 25,
+          retryDelayMs: 0,
+        });
+
+        await host.executeAction("enqueueJobs");
+
+        const firstDrain = await host.drain({ maxRuns: 1 });
+        expect(firstDrain).toEqual({
+          cronSchedules: 0,
+          idle: false,
+          queueJobs: 1,
+          runs: 1,
+          stopReason: "max_runs",
+        });
+        expect(processed).toEqual(["job-1"]);
+
+        const secondDrain = await host.drain();
+        expect(secondDrain).toEqual({
+          cronSchedules: 0,
+          idle: true,
+          queueJobs: 1,
+          runs: 1,
+          stopReason: "idle",
+        });
+        expect(processed).toEqual(["job-1", "job-2"]);
+      } finally {
+        host.close();
+      }
+    }, 30000);
+
+    test("ChimpbaseDenoHost.load registers entrypoints and serves requests through Deno.serve", async () => {
+      const database = await postgres.createDatabase("deno_load");
+      const projectDir = await createDenoProjectFixture("load", database.url);
+      let shutdownCalled = false;
+      let servedHandler: ((request: Request) => Response | Promise<Response>) | null = null;
+
+      installFakeDenoRuntime({
+        env: {},
+        serve(_options, handler) {
+          servedHandler = handler;
+          return {
+            finished: Promise.resolve(),
+            shutdown() {
+              shutdownCalled = true;
+            },
+          };
+        },
+      });
+
+      const host = await ChimpbaseDenoHost.load(projectDir);
+
+      try {
+        const queueResult = await host.executeAction("enqueueAudit", ["from-load"]);
+        expect(queueResult.result).toEqual({ queued: "from-load" });
+
+        const drained = await host.drain();
+        expect(drained).toEqual({
+          cronSchedules: 0,
+          idle: true,
+          queueJobs: 1,
+          runs: 1,
+          stopReason: "idle",
+        });
+
+        const audit = await host.executeAction("listAudit");
+        expect(audit.result).toEqual([{ value: "from-load" }]);
+
+        const routeOutcome = await host.executeRoute(new Request("http://deno.test/audit"));
+        expect(routeOutcome.response?.status).toBe(200);
+        expect(await routeOutcome.response?.json()).toEqual([{ value: "from-load" }]);
+
+        const started = host.start({ runWorker: false, serve: true });
+        expect(started.server?.port).toBe(4821);
+        const routeHandler: (request: Request) => Response | Promise<Response> = servedHandler ?? (() => {
+          throw new Error("expected Deno.serve handler to be registered");
+        });
+
+        const healthResponse = await routeHandler(new Request("http://127.0.0.1:4821/health"));
+        expect(healthResponse.status).toBe(200);
+        expect(await healthResponse.json()).toEqual({ ok: true });
+
+        const auditResponse = await routeHandler(new Request("http://127.0.0.1:4821/audit"));
+        expect(auditResponse.status).toBe(200);
+        expect(await auditResponse.json()).toEqual([{ value: "from-load" }]);
+
+        await started.stop();
+        expect(shutdownCalled).toBe(true);
+      } finally {
+        host.close();
+      }
+    }, 30000);
+  });
+}
+
+describe("chimpbase-deno runtime guards", () => {
+  if (!bunSupportsBetterSqlite3) {
+    test.skip("memory storage is covered in a real Deno process", () => {});
+  } else {
+    test("supports memory storage through the sqlite adapter", async () => {
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-memory-"));
+      cleanupDirs.push(projectDir);
+      installFakeDenoRuntime({ env: {} });
+
+      const processed: string[] = [];
+      const host = await ChimpbaseDenoHost.create({
+        config: normalizeProjectConfig({
+          project: { name: "deno-memory" },
+          storage: { engine: "memory" },
+          worker: { retryDelayMs: 0 },
+        }),
+        projectDir,
+      });
+
+      host.registerAction("enqueueMemoryJob", async (ctx) => {
+        await ctx.queue.enqueue("memory.job", { value: "memory" });
+        return null;
+      });
+      host.registerWorker("memory.job", async (_ctx, payload) => {
+        processed.push((payload as { value: string }).value);
+      });
+
+      try {
+        expect(host.config.storage).toEqual({
+          engine: "memory",
+          path: null,
+          url: null,
+        });
+
+        await host.executeAction("enqueueMemoryJob");
+        const drain = await host.drain();
+
+        expect(drain).toEqual({
+          cronSchedules: 0,
+          idle: true,
+          queueJobs: 1,
+          runs: 1,
+          stopReason: "idle",
+        });
+        expect(processed).toEqual(["memory"]);
+      } finally {
+        host.close();
+      }
+    });
+  }
+
+  test("requires a postgres url when opening storage", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-postgres-url-"));
+    cleanupDirs.push(projectDir);
+    installFakeDenoRuntime({ env: {} });
+
+    await expect(
+      ChimpbaseDenoHost.create({
+        config: normalizeProjectConfig({
+          project: { name: "deno-postgres" },
+          storage: { engine: "postgres" },
+        }),
+        projectDir,
+      }),
+    ).rejects.toThrow("@chimpbase/deno requires storage.url for postgres storage");
+  });
+});
+
+function installFakeDenoRuntime(options: FakeDenoRuntimeOptions): void {
+  const env = options.env ?? {};
+
+  Reflect.set(globalThis, "Deno", {
+    args: [],
+    env: {
+      get(name: string) {
+        return env[name];
+      },
+      toObject() {
+        return { ...env };
+      },
+    },
+    serve: options.serve,
+  });
+}
+
+function restoreDenoRuntime(): void {
+  if (originalDeno === undefined) {
+    Reflect.deleteProperty(globalThis, "Deno");
+    return;
+  }
+
+  Reflect.set(globalThis, "Deno", originalDeno);
+}
+
+async function createDenoProjectFixture(label: string, databaseUrl: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), `chimpbase-deno-inline-${label}-`));
+  cleanupDirs.push(dir);
+
+  await mkdir(resolve(dir, "node_modules/@chimpbase"), { recursive: true });
+  await cp(resolve(repoRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
+    recursive: true,
+  });
+
+  await writeFile(
+    resolve(dir, "package.json"),
+    JSON.stringify(
+      {
+        dependencies: {
+          "@chimpbase/runtime": "file:./packages/runtime",
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  await writeFile(
+    resolve(dir, "tsconfig.json"),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          allowImportingTsExtensions: true,
+          lib: ["ES2022", "DOM"],
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          noEmit: true,
+          skipLibCheck: true,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["index.ts"],
+      },
+      null,
+      2,
+    ),
+  );
+
+  await mkdir(resolve(dir, "migrations"), { recursive: true });
+  await writeFile(
+    resolve(dir, "migrations/001_worker_audit.sql"),
+    "CREATE TABLE IF NOT EXISTS worker_audit (id SERIAL PRIMARY KEY, value TEXT NOT NULL);\n",
+  );
+  await writeFile(
+    resolve(dir, "index.ts"),
+    [
+      'import { action, register, worker } from "@chimpbase/runtime";',
+      "",
+      "export async function fetch(request, env) {",
+      "  if (new URL(request.url).pathname === \"/audit\") {",
+      "    const rows = await env.action(\"listAudit\");",
+      "    return Response.json(rows);",
+      "  }",
+      "",
+      "  return new Response(\"not found\", { status: 404 });",
+      "}",
+      "",
+      "register({",
+      "  registerAction(name, handler) { return globalThis.defineAction(name, handler); },",
+      "  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },",
+      "  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },",
+      "}, [",
+      "  action(\"enqueueAudit\", async (ctx, value) => {",
+      "    await ctx.queue.enqueue(\"audit.job\", { value });",
+      "    return { queued: value };",
+      "  }),",
+      "  action(\"listAudit\", async (ctx) => await ctx.query(\"SELECT value FROM worker_audit ORDER BY id ASC\")),",
+      "  worker(\"audit.job\", async (ctx, payload) => {",
+      "    await ctx.query(\"INSERT INTO worker_audit (value) VALUES (?1)\", [(payload).value]);",
+      "  }),",
+      "]);",
+    ].join("\n"),
+  );
+  await writeFile(
+    resolve(dir, "chimpbase.toml"),
+    [
+      "[project]",
+      'name = "deno-load"',
+      "",
+      "[storage]",
+      'engine = "postgres"',
+      `url = "${databaseUrl}"`,
+      "",
+      "[server]",
+      "port = 4821",
+      "",
+      "[worker]",
+      "retry_delay_ms = 0",
+    ].join("\n"),
+  );
+
+  return dir;
+}

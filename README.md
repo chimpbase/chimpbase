@@ -1,21 +1,41 @@
-# @chimpbase/bun
+# chimpbase
 
-Build complex backends with a small runtime surface.
+Build action-driven backends with a small runtime surface.
 
 The posture is simple:
 
 - write TypeScript
-- use Postgres
+- pick a host package for Bun or Deno CLI/self-hosted
+- use Postgres in production
+- use SQLite or memory when local simplicity matters
 - keep the primitives close to the problem
 - avoid boilerplate and extra infrastructure too early
 
 ## Install
 
+Host packages available today:
+
+- `@chimpbase/runtime` for the shared DSL and primitives
+- `@chimpbase/bun` for Bun-first applications
+- `@chimpbase/deno` for Deno CLI/self-hosted applications
+
+For Bun:
+
 ```bash
 bun add @chimpbase/bun @chimpbase/runtime
 ```
 
+For Deno CLI/self-hosted:
+
+```bash
+deno add npm:@chimpbase/deno npm:@chimpbase/runtime
+```
+
+The Deno host relies on Deno's npm and Node compatibility.
+
 ## Show me the code
+
+Bun:
 
 ```ts
 import {
@@ -78,7 +98,19 @@ chimpbase.register(
 await chimpbase.start();
 ```
 
-That is the shape this project is optimizing for:
+Deno CLI/self-hosted:
+
+```ts
+import { createChimpbaseDeno } from "npm:@chimpbase/deno";
+
+const chimpbase = await createChimpbaseDeno.from(Deno.cwd(), {
+  storage: { engine: "sqlite" },
+});
+
+await chimpbase.start();
+```
+
+That is the shape chimpbase is optimizing for:
 
 - SQL when you want SQL
 - small runtime primitives for the glue around it
@@ -96,7 +128,7 @@ Most backend complexity is real complexity:
 
 The mistake is usually adding too many concepts around that.
 
-`@chimpbase/bun` keeps the model tighter:
+The shared runtime model stays tight:
 
 - `action(...)` for business operations
 - `subscription(...)` for ephemeral internal pub/sub
@@ -106,9 +138,9 @@ The mistake is usually adding too many concepts around that.
 
 Everything runs on the same engine and can share the same storage story.
 
-## Just use Postgres
+## Postgres first, SQLite when local
 
-SQLite is supported and tested. It is useful for local work and fast tests.
+SQLite and memory are supported for local work and fast tests.
 
 But the default recommendation is:
 
@@ -122,7 +154,7 @@ That gives you a clean baseline:
 - no broker required on day one
 - no extra service just to coordinate background work
 
-If `DATABASE_URL` is present, the runtime already takes the Postgres path automatically.
+If `DATABASE_URL` is present, the Bun and Deno hosts both take the Postgres path automatically.
 
 ## The primitives
 
@@ -414,19 +446,23 @@ There is also workflow contract sync in the CLI:
 ```bash
 bun packages/bun/src/cli.ts contracts --project-dir ./my-project
 bun packages/bun/src/cli.ts contracts --project-dir ./my-project --check
+deno run -A packages/deno/src/cli.ts contracts --project-dir ./my-project
+deno run -A packages/deno/src/cli.ts contracts --project-dir ./my-project --check
 ```
 
 That gives you versioned snapshots and compatibility checks without introducing another workflow platform.
 
 ## Examples
 
-The repo currently ships with:
+The repo currently ships with Bun examples:
 
 - `examples/bun/todo-ts`
 - `examples/bun/todo-ts` includes a cron example in `src/modules/todos/todo.cron.ts`
 - `examples/bun/todo-ts-decorators`
 - `examples/bun/todo-ts-nestjs`
 - `examples/bun/todo-ts-nestjs-decorators`
+
+The Deno host is available for CLI/self-hosted projects and uses the same runtime DSL, but the repository examples have not been duplicated under `examples/deno` yet.
 
 ## Release model
 
@@ -435,11 +471,12 @@ The published packages intentionally ship TypeScript source files instead of a p
 That means:
 
 - `@chimpbase/bun` is Bun-first
+- `@chimpbase/deno` is Deno CLI/self-hosted
 - `@chimpbase/runtime` and `@chimpbase/core` are distributed as source for TypeScript-aware consumers
 - the monorepo release check is `bun run release:check`
 - the publish flow is `bun run release:publish`
 
-This keeps the alpha small and honest. A compiled multi-runtime distribution can come later when `packages/node` and other hosts exist.
+This keeps the alpha small and honest while the host surface grows incrementally.
 
 ## Status
 
@@ -447,10 +484,11 @@ The project already has:
 
 - SQLite integration coverage
 - Postgres integration coverage
+- Deno CLI/self-hosted host support for Postgres, SQLite and memory
 - durable workflow tests
 - workflow contract sync tests
 - end-to-end tests for the examples
 
 The intended reading is straightforward:
 
-this is a Postgres-first runtime for developers who want to build serious systems with less ceremony.
+this is a Postgres-first runtime with practical local-storage options for developers who want to build serious systems with less ceremony.

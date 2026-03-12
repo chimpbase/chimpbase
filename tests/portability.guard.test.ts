@@ -43,6 +43,21 @@ describe("portable package guards", () => {
       expect(violations).toEqual([]);
     });
   }
+
+  test("@chimpbase/deno stays free of Bun globals", async () => {
+    const packageDir = resolve(repoRoot, "packages", "deno");
+    const files = await listTypescriptFiles(packageDir);
+    const violations: string[] = [];
+
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      if (/\bBun\b/.test(source)) {
+        violations.push(`${relative(repoRoot, file)}: found Bun global`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
 });
 
 async function listTypescriptFiles(dir: string): Promise<string[]> {

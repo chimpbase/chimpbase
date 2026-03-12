@@ -13,9 +13,9 @@
     "dev:todo-ts-decorators": "bun run --filter @chimpbase/example-todo-ts-decorators dev",
     "dev:todo-ts-nestjs": "bun run --filter @chimpbase/example-todo-ts-nestjs dev",
     "dev:todo-ts-nestjs-decorators": "bun run --filter @chimpbase/example-todo-ts-nestjs-decorators dev",
-    "publish:dry-run": "(cd packages/runtime && bun publish --dry-run --frozen-lockfile) && (cd packages/core && bun publish --dry-run --frozen-lockfile) && (cd packages/tooling && bun publish --dry-run --frozen-lockfile) && (cd packages/postgres && bun publish --dry-run --frozen-lockfile) && (cd packages/bun && bun publish --dry-run --frozen-lockfile)",
+    "publish:dry-run": "(cd packages/runtime && bun publish --dry-run --frozen-lockfile) && (cd packages/core && bun publish --dry-run --frozen-lockfile) && (cd packages/tooling && bun publish --dry-run --frozen-lockfile) && (cd packages/postgres && bun publish --dry-run --frozen-lockfile) && (cd packages/deno && bun publish --dry-run --frozen-lockfile) && (cd packages/bun && bun publish --dry-run --frozen-lockfile)",
     "release:check": "bun run ci:check",
-    "release:publish": "(cd packages/runtime && bun publish --frozen-lockfile) && (cd packages/core && bun publish --frozen-lockfile) && (cd packages/tooling && bun publish --frozen-lockfile) && (cd packages/postgres && bun publish --frozen-lockfile) && (cd packages/bun && bun publish --frozen-lockfile)",
+    "release:publish": "(cd packages/runtime && bun publish --frozen-lockfile) && (cd packages/core && bun publish --frozen-lockfile) && (cd packages/tooling && bun publish --frozen-lockfile) && (cd packages/postgres && bun publish --frozen-lockfile) && (cd packages/deno && bun publish --frozen-lockfile) && (cd packages/bun && bun publish --frozen-lockfile)",
     "test": "bun test",
     "typecheck": "./node_modules/.bin/tsc --noEmit"
   },
