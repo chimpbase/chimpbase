@@ -5,7 +5,7 @@ import { todoApiApp } from "./src/http/app.ts";
 
 export async function createTodoApplication() {
   const chimpbase = await createChimpbase({
-    app,
+    ...app,
     projectDir: import.meta.dir,
   });
 

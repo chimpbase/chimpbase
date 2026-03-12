@@ -12,23 +12,22 @@ The posture is simple:
 ## Install
 
 ```bash
-bun add @chimpbase/bun @chimpbase/runtime
+bun add @chimpbase/bun
 ```
+
+Add `@chimpbase/runtime` when you want explicit `chimpbase.app.ts`, exported `registrations`, or workflow definitions.
 
 ## Show me the code
 
 ```ts
-import {
-  action,
-  worker,
-  subscription,
-} from "@chimpbase/runtime";
 import { createChimpbase } from "@chimpbase/bun";
 
-const chimpbase = await createChimpbase.from(import.meta.dir);
+const chimpbase = await createChimpbase({
+  storage: { engine: "postgres", url: process.env.DATABASE_URL! },
+});
 
-chimpbase.register(
-  action("createCustomer", async (ctx, input) => {
+chimpbase
+  .action("createCustomer", async (ctx, input) => {
     const [customer] = await ctx.query<{ id: number }>(
       "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id",
       [input.email, input.name, input.plan],
@@ -53,13 +52,13 @@ chimpbase.register(
     });
 
     return customer;
-  }),
+  })
 
-  subscription("customer.created", async (ctx, event) => {
+  .subscription("customer.created", async (ctx, event) => {
     await ctx.queue.enqueue("customer.sync", event);
-  }),
+  })
 
-  worker("customer.sync", async (ctx, event) => {
+  .worker("customer.sync", async (ctx, event) => {
     const apiKey = ctx.secret("CRM_API_KEY");
 
     ctx.log.info("syncing customer", { customerId: event.customerId });
@@ -72,8 +71,7 @@ chimpbase.register(
     );
 
     return { apiKeyLoaded: Boolean(apiKey) };
-  }),
-);
+  });
 
 await chimpbase.start();
 ```
@@ -82,7 +80,9 @@ That is the shape this project is optimizing for:
 
 - SQL when you want SQL
 - small runtime primitives for the glue around it
-- one place to define actions, reactions and async work
+- direct host registration for small apps
+
+For multi-module apps, keep `chimpbase.app.ts` explicit and export `registrations`.
 
 ## Why this feels simple
 

@@ -1,4 +1,4 @@
-import { access, rm, symlink } from "node:fs/promises";
+import { access, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -8,12 +8,7 @@ import {
   type ChimpbaseAppDefinitionInput,
 } from "@chimpbase/core";
 
-const PROJECT_APP_MODULE_CANDIDATES = [
-  "chimpbase.app.ts",
-  "chimpbase.app.js",
-  "chimpbase.app.mts",
-  "chimpbase.app.mjs",
-] as const;
+const PROJECT_APP_MODULE_FILE = "chimpbase.app.ts";
 
 export async function loadProjectAppDefinition(projectDir: string): Promise<ChimpbaseAppDefinition | null> {
   const appModulePath = await resolveProjectAppModulePath(projectDir);
@@ -25,29 +20,27 @@ export async function loadProjectAppDefinition(projectDir: string): Promise<Chim
 }
 
 export async function resolveProjectAppModulePath(projectDir: string): Promise<string | null> {
-  for (const candidate of PROJECT_APP_MODULE_CANDIDATES) {
-    const path = resolve(projectDir, candidate);
-    if (await fileExists(path)) {
-      return path;
-    }
+  const path = resolve(projectDir, PROJECT_APP_MODULE_FILE);
+  if (await fileExists(path)) {
+    return path;
   }
 
   return null;
 }
 
 export async function loadChimpbaseAppDefinitionModule(modulePath: string): Promise<ChimpbaseAppDefinition> {
-  const aliasPath = join(
+  const tempModulePath = join(
     dirname(modulePath),
     `.__chimpbase_app_${globalThis.crypto.randomUUID()}${extname(modulePath) || ".ts"}`,
   );
 
-  await symlink(modulePath, aliasPath);
+  await writeFile(tempModulePath, await readFile(modulePath, "utf8"));
 
   try {
-    const moduleExports = await import(pathToFileURL(aliasPath).href);
+    const moduleExports = await import(pathToFileURL(tempModulePath).href);
     return coerceChimpbaseAppDefinition(moduleExports, modulePath);
   } finally {
-    await rm(aliasPath, { force: true });
+    await rm(tempModulePath, { force: true });
   }
 }
 

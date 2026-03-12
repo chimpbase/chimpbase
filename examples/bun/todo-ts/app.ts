@@ -19,7 +19,7 @@ export async function createTodoApplication() {
     }),
   );
   const chimpbase = await createChimpbase({
-    app,
+    ...app,
     projectDir: import.meta.dir,
     secrets,
   });

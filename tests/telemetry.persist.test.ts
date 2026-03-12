@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createChimpbase } from "../packages/bun/src/library.ts";
+import { defineChimpbaseApp } from "../packages/core/index.ts";
 import { action, worker } from "../packages/runtime/index.ts";
 import type { ChimpbaseBunHost } from "../packages/bun/src/runtime.ts";
 
@@ -35,9 +36,14 @@ async function createMemoryHost(
   cleanupDirs.push(dir);
   await writeFile(join(dir, "package.json"), "{}");
 
-  const host = await createChimpbase.from(dir, {
+  const host = await createChimpbase({
+    app: defineChimpbaseApp({
+      project: { name: "telemetry-test" },
+      registrations: [],
+      telemetry: options.telemetry,
+    }),
+    projectDir: dir,
     storage: { engine: "memory" },
-    telemetry: options.telemetry,
   });
   cleanupHosts.push(host);
   return host;

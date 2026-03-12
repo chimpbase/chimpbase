@@ -15,21 +15,23 @@ The posture is simple:
 
 Host packages available today:
 
-- `@chimpbase/runtime` for the shared DSL and primitives
 - `@chimpbase/bun` for Bun-first applications
 - `@chimpbase/deno` for Deno CLI/self-hosted applications
+- `@chimpbase/runtime` for explicit `chimpbase.app.ts`, `registrations`, and workflow definitions
 
 For Bun:
 
 ```bash
-bun add @chimpbase/bun @chimpbase/runtime
+bun add @chimpbase/bun
 ```
 
 For Deno CLI/self-hosted:
 
 ```bash
-deno add npm:@chimpbase/deno npm:@chimpbase/runtime
+deno add npm:@chimpbase/deno
 ```
+
+Add `@chimpbase/runtime` when you want explicit app modules or workflow definitions.
 
 The Deno host relies on Deno's npm and Node compatibility.
 
@@ -38,69 +40,59 @@ The Deno host relies on Deno's npm and Node compatibility.
 Bun:
 
 ```ts
-import {
-  action,
-  subscription,
-  worker,
-} from "@chimpbase/runtime";
-import { createChimpbase, defineChimpbaseApp } from "@chimpbase/bun";
+import { createChimpbase } from "@chimpbase/bun";
 
-const app = defineChimpbaseApp({
-  project: { name: "acme" },
-  registrations: [
-    action("createCustomer", async (ctx, input) => {
-      const [customer] = await ctx.query<{ id: number }>(
-        "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id",
-        [input.email, input.name, input.plan],
-      );
-
-      await ctx.kv.set(`customer:${customer.id}:status`, "new");
-
-      await ctx.collection.insert("customer_profiles", {
-        customerId: customer.id,
-        plan: input.plan,
-        source: "signup",
-      });
-
-      await ctx.stream.append("customers", "customer.created", {
-        customerId: customer.id,
-        email: input.email,
-      });
-
-      ctx.pubsub.publish("customer.created", {
-        customerId: customer.id,
-        email: input.email,
-      });
-
-      return customer;
-    }),
-    subscription("customer.created", async (ctx, event) => {
-      await ctx.queue.enqueue("customer.sync", event);
-    }, { idempotent: true, name: "enqueueCustomerSync" }),
-    worker("customer.sync", async (ctx, event) => {
-      const apiKey = ctx.secret("CRM_API_KEY");
-
-      ctx.log.info("syncing customer", { customerId: event.customerId });
-      ctx.metric("customer_sync_total", 1, { source: "crm" });
-
-      await ctx.collection.update(
-        "customer_profiles",
-        { customerId: event.customerId },
-        { syncedWithCrm: true },
-      );
-
-      return { apiKeyLoaded: Boolean(apiKey) };
-    }),
-  ],
+const chimpbase = await createChimpbase({
   telemetry: {
     minLevel: "info",
   },
-);
-
-const chimpbase = await createChimpbase({
-  app,
   storage: { engine: "postgres", url: process.env.DATABASE_URL! },
 });
+
+chimpbase
+  .action("createCustomer", async (ctx, input) => {
+    const [customer] = await ctx.query<{ id: number }>(
+      "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id",
+      [input.email, input.name, input.plan],
+    );
+
+    await ctx.kv.set(`customer:${customer.id}:status`, "new");
+
+    await ctx.collection.insert("customer_profiles", {
+      customerId: customer.id,
+      plan: input.plan,
+      source: "signup",
+    });
+
+    await ctx.stream.append("customers", "customer.created", {
+      customerId: customer.id,
+      email: input.email,
+    });
+
+    ctx.pubsub.publish("customer.created", {
+      customerId: customer.id,
+      email: input.email,
+    });
+
+    return customer;
+  })
+  .subscription("customer.created", async (ctx, event) => {
+    await ctx.queue.enqueue("customer.sync", event);
+  }, { idempotent: true, name: "enqueueCustomerSync" })
+  .worker("customer.sync", async (ctx, event) => {
+    const apiKey = ctx.secret("CRM_API_KEY");
+
+    ctx.log.info("syncing customer", { customerId: event.customerId });
+    ctx.metric("customer_sync_total", 1, { source: "crm" });
+
+    await ctx.collection.update(
+      "customer_profiles",
+      { customerId: event.customerId },
+      { syncedWithCrm: true },
+    );
+
+    return { apiKeyLoaded: Boolean(apiKey) };
+  });
 
 await chimpbase.start();
 ```
@@ -108,25 +100,27 @@ await chimpbase.start();
 Deno CLI/self-hosted:
 
 ```ts
-import { action } from "npm:@chimpbase/runtime";
-import { createChimpbaseDeno, defineChimpbaseApp } from "npm:@chimpbase/deno";
-
-const app = defineChimpbaseApp({
-  project: { name: "acme-deno" },
-  registrations: [
-    action("health", async () => ({ ok: true })),
-  ],
-});
+import { createChimpbaseDeno } from "npm:@chimpbase/deno";
 
 const chimpbase = await createChimpbaseDeno({
-  app,
   storage: { engine: "sqlite", path: "data/acme-deno.db" },
 });
+
+chimpbase.action("health", async () => ({ ok: true }));
 
 await chimpbase.start();
 ```
 
-That is the canonical shape chimpbase is optimizing for:
+For one-file apps, that is the smallest shape chimpbase is optimizing for:
+
+- SQL when you want SQL
+- one host instance with explicit registrations
+- no extra app wrapper when you do not need one
+- deploy/runtime wiring provided by the host package
+
+For multi-module apps, keep `chimpbase.app.ts` explicit and export `registrations`.
+
+That is still the canonical composition shape for larger projects:
 
 - SQL when you want SQL
 - one code-first app definition with `registrations`
@@ -334,15 +328,10 @@ By default, `ctx.log`, `ctx.metric` and `ctx.trace` are collected in memory and 
 ### Enable globally
 
 ```ts
-const app = defineChimpbaseApp({
-  project: { name: "telemetry-app" },
+const chimpbase = await createChimpbase({
   telemetry: {
     persist: { log: true, metric: true, trace: true },
   },
-});
-
-const chimpbase = await createChimpbase({
-  app,
   storage: { engine: "sqlite", path: "data/telemetry-app.db" },
 });
 ```
@@ -389,7 +378,9 @@ Enable retention to automatically delete old telemetry stream events:
 
 ```ts
 const chimpbase = await createChimpbase({
-  app,
+  telemetry: {
+    persist: { log: true, metric: true, trace: true },
+  },
   storage: { engine: "postgres", url: process.env.DATABASE_URL! },
   telemetryRetention: {
     enabled: true,

@@ -123,6 +123,8 @@ export interface ChimpbaseAppDefinition {
   workflows: ChimpbaseAppWorkflowConfig;
 }
 
+export type ChimpbaseAppModule = ChimpbaseAppDefinition;
+
 export interface ChimpbaseAppDefinitionInput {
   httpHandler?: ChimpbaseRouteHandler | { fetch: ChimpbaseRouteHandler } | null;
   migrations?: ChimpbaseMigrationsDefinitionInput;
@@ -134,6 +136,8 @@ export interface ChimpbaseAppDefinitionInput {
   worker?: ChimpbaseAppWorkerConfigInput;
   workflows?: ChimpbaseAppWorkflowConfigInput;
 }
+
+export type ChimpbaseAppModuleInput = ChimpbaseAppDefinitionInput;
 
 export interface ChimpbaseWorkerRegistration {
   definition: Required<ChimpbaseWorkerDefinition>;

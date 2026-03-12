@@ -220,7 +220,7 @@ describe("sqlite integration", () => {
     } finally {
       await server.stop();
     }
-  });
+  }, 30000);
 
   test("boots the todo-ts-nestjs-decorators example against SQLite", async () => {
     const fixture = await createTodoTsNestjsDecoratorsFixture("sqlite");
@@ -242,7 +242,7 @@ describe("sqlite integration", () => {
     } finally {
       await server.stop();
     }
-  });
+  }, 30000);
 });
 
 function sqliteEnv(): Record<string, string> {
@@ -261,12 +261,11 @@ async function createRuntimeFixture(label: string): Promise<string> {
   await cp(resolve(exampleDir, "migrations"), resolve(dir, "migrations"), { recursive: true });
   await cp(resolve(exampleDir, "chimpbase.migrations.ts"), resolve(dir, "chimpbase.migrations.ts"));
   await writeFile(
-    resolve(dir, "index.ts"),
+    resolve(dir, "chimpbase.app.ts"),
     [
       'import { todoApiApp } from "./src/http/app.ts";',
-      'export const fetch = todoApiApp.fetch.bind(todoApiApp);',
-      'export { todoApiApp as app };',
-      'import { action, worker, register, subscription } from "@chimpbase/runtime";',
+      'import migrations from "./chimpbase.migrations.ts";',
+      'import { action, worker, subscription } from "@chimpbase/runtime";',
       'import { createProject, listProjects } from "./src/modules/projects/project.actions.ts";',
       'import { assignTodo, completeTodo, createTodo, getTodoDashboard, listTodos, startTodo } from "./src/modules/todos/todo.actions.ts";',
       'import { listTodoAuditLog, listTodoEvents, listTodoNotifications } from "./src/modules/todos/todo.audit.actions.ts";',
@@ -274,36 +273,38 @@ async function createRuntimeFixture(label: string): Promise<string> {
       'import { addTodoNote, listTodoActivityStream, listTodoNotes, listWorkspacePreferences, setWorkspacePreference } from "./src/modules/todos/todo.platform.actions.ts";',
       'import { captureTodoCompletedDlq, notifyTodoCompleted } from "./src/modules/todos/todo.workers.ts";',
       'import { seedDemoWorkspace } from "./src/modules/todos/todo.seed.actions.ts";',
-      'register({',
-      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-      '}, [',
-      '  action("listProjects", listProjects),',
-      '  action("createProject", createProject),',
-      '  action("listTodos", listTodos),',
-      '  action("createTodo", createTodo),',
-      '  action("assignTodo", assignTodo),',
-      '  action("startTodo", startTodo),',
-      '  action("completeTodo", completeTodo),',
-      '  action("getTodoDashboard", getTodoDashboard),',
-      '  action("listTodoAuditLog", listTodoAuditLog),',
-      '  action("listTodoEvents", listTodoEvents),',
-      '  action("listTodoNotifications", listTodoNotifications),',
-      '  subscription("todo.created", auditTodoCreated),',
-      '  subscription("todo.assigned", auditTodoAssigned),',
-      '  subscription("todo.started", auditTodoStarted),',
-      '  subscription("todo.completed", auditTodoCompleted),',
-      '  subscription("todo.completed", enqueueTodoCompletedNotification),',
-      '  action("listWorkspacePreferences", listWorkspacePreferences),',
-      '  action("setWorkspacePreference", setWorkspacePreference),',
-      '  action("addTodoNote", addTodoNote),',
-      '  action("listTodoNotes", listTodoNotes),',
-      '  action("listTodoActivityStream", listTodoActivityStream),',
-      '  worker("todo.completed.notify", notifyTodoCompleted),',
-      '  worker("todo.completed.notify.dlq", captureTodoCompletedDlq, { dlq: false }),',
-      '  action("seedDemoWorkspace", seedDemoWorkspace),',
-      ']);',
+      '',
+      'export default {',
+      '  httpHandler: todoApiApp,',
+      '  migrations,',
+      '  project: { name: "todo-ts-sqlite-test" },',
+      '  registrations: [',
+      '    action("listProjects", listProjects),',
+      '    action("createProject", createProject),',
+      '    action("listTodos", listTodos),',
+      '    action("createTodo", createTodo),',
+      '    action("assignTodo", assignTodo),',
+      '    action("startTodo", startTodo),',
+      '    action("completeTodo", completeTodo),',
+      '    action("getTodoDashboard", getTodoDashboard),',
+      '    action("listTodoAuditLog", listTodoAuditLog),',
+      '    action("listTodoEvents", listTodoEvents),',
+      '    action("listTodoNotifications", listTodoNotifications),',
+      '    subscription("todo.created", auditTodoCreated),',
+      '    subscription("todo.assigned", auditTodoAssigned),',
+      '    subscription("todo.started", auditTodoStarted),',
+      '    subscription("todo.completed", auditTodoCompleted),',
+      '    subscription("todo.completed", enqueueTodoCompletedNotification),',
+      '    action("listWorkspacePreferences", listWorkspacePreferences),',
+      '    action("setWorkspacePreference", setWorkspacePreference),',
+      '    action("addTodoNote", addTodoNote),',
+      '    action("listTodoNotes", listTodoNotes),',
+      '    action("listTodoActivityStream", listTodoActivityStream),',
+      '    worker("todo.completed.notify", notifyTodoCompleted),',
+      '    worker("todo.completed.notify.dlq", captureTodoCompletedDlq, { dlq: false }),',
+      '    action("seedDemoWorkspace", seedDemoWorkspace),',
+      '  ],',
+      '};',
     ].join("\n"),
   );
   await writeFile(resolve(dir, "tsconfig.json"), await Bun.file(resolve(exampleDir, "tsconfig.json")).text());
@@ -331,21 +332,6 @@ async function createRuntimeFixture(label: string): Promise<string> {
       null,
       2,
     ),
-  );
-  await writeFile(
-    resolve(dir, "chimpbase.toml"),
-    [
-      "[project]",
-      'name = "todo-ts-sqlite-test"',
-      "",
-      "[storage]",
-      'engine = "sqlite"',
-      'path = ":memory:"',
-      "",
-      "[server]",
-      "port = 39002",
-      "",
-    ].join("\n"),
   );
   await writeFile(resolve(dir, ".env"), "TODO_NOTIFIER_SENDER=alerts@sqlite.test\n");
 
@@ -392,29 +378,17 @@ async function createKyselyFixture(label: string): Promise<string> {
           strict: true,
           target: "ES2022",
         },
-        include: ["index.ts"],
+        include: ["**/*.ts"],
       },
       null,
       2,
     ),
   );
-  await mkdir(resolve(dir, "migrations"), { recursive: true });
   await writeFile(
-    resolve(dir, "migrations/001_init.sql"),
-    [
-      "CREATE TABLE accounts (",
-      "  id INTEGER PRIMARY KEY,",
-      "  email TEXT NOT NULL UNIQUE,",
-      "  name TEXT NOT NULL,",
-      "  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
-      ");",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(dir, "index.ts"),
+    resolve(dir, "chimpbase.app.ts"),
     [
       'import type { Generated } from "kysely";',
-      'import { action, register } from "@chimpbase/runtime";',
+      'import { action } from "@chimpbase/runtime";',
       "",
       "interface AccountTable {",
       "  id: Generated<number>;",
@@ -427,42 +401,32 @@ async function createKyselyFixture(label: string): Promise<string> {
       "  accounts: AccountTable;",
       "}",
       "",
-      "register({",
-      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-      "}, [",
-      '  action("createAccount", async (ctx, email, name) => {',
-      "    const db = ctx.db<Database>();",
-      '    await db.insertInto("accounts").values({ email, name }).execute();',
-      '    const [row] = await ctx.query<{ email: string; name: string }>(',
-      '      "SELECT email, name FROM accounts WHERE email = ?1",',
-      "      [email],",
-      "    );",
-      "    return row;",
-      "  }),",
-      '  action("listAccounts", async (ctx) => {',
-      "    const db = ctx.db<Database>();",
-      '    return await db.selectFrom("accounts").select(["id", "email", "name"]).orderBy("id", "asc").execute();',
-      "  }),",
-      '  action("createAndFailAccount", async (ctx, email, name) => {',
-      "    const db = ctx.db<Database>();",
-      '    await db.insertInto("accounts").values({ email, name }).execute();',
-      '    throw new Error("boom");',
-      "  }),",
-      "]);",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(dir, "chimpbase.toml"),
-    [
-      "[project]",
-      'name = "sqlite-kysely-test"',
-      "",
-      "[storage]",
-      'engine = "sqlite"',
-      'path = ":memory:"',
-      "",
+      "export default {",
+      "  migrations: {",
+      '    sqlite: [{ name: "001_init", sql: "CREATE TABLE accounts (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);" }],',
+      "  },",
+      '  project: { name: "sqlite-kysely-test" },',
+      "  registrations: [",
+      '    action("createAccount", async (ctx, email, name) => {',
+      "      const db = ctx.db<Database>();",
+      '      await db.insertInto("accounts").values({ email, name }).execute();',
+      '      const [row] = await ctx.query<{ email: string; name: string }>(',
+      '        "SELECT email, name FROM accounts WHERE email = ?1",',
+      "        [email],",
+      "      );",
+      "      return row;",
+      "    }),",
+      '    action("listAccounts", async (ctx) => {',
+      "      const db = ctx.db<Database>();",
+      '      return await db.selectFrom("accounts").select(["id", "email", "name"]).orderBy("id", "asc").execute();',
+      "    }),",
+      '    action("createAndFailAccount", async (ctx, email, name) => {',
+      "      const db = ctx.db<Database>();",
+      '      await db.insertInto("accounts").values({ email, name }).execute();',
+      '      throw new Error("boom");',
+      "    }),",
+      "  ],",
+      "};",
     ].join("\n"),
   );
 

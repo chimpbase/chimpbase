@@ -5,7 +5,7 @@ import {
   subscription,
   worker,
 } from "@chimpbase/runtime";
-import { createChimpbase, defineChimpbaseApp } from "@chimpbase/bun";
+import { createChimpbase } from "@chimpbase/bun";
 
 import migrations from "./chimpbase.migrations.ts";
 import { AppModule } from "./src/nest/app.module.ts";
@@ -28,9 +28,10 @@ export async function createTodoApplication() {
   const todoSubscriptions = nestApp.get(TodoSubscriptionsService);
   const todoWorkers = nestApp.get(TodoWorkersService);
 
-  const app = defineChimpbaseApp({
+  const chimpbase = await createChimpbase({
     httpHandler: todoApiApp,
     migrations,
+    projectDir: import.meta.dir,
     project: {
       name: "todo-ts-nestjs",
     },
@@ -60,10 +61,6 @@ export async function createTodoApplication() {
       worker("todo.completed.notify.dlq", todoWorkers.captureTodoCompletedDlq.bind(todoWorkers), { dlq: false }),
       action("seedDemoWorkspace", todoActions.seedDemoWorkspace.bind(todoActions)),
     ],
-  });
-  const chimpbase = await createChimpbase({
-    app,
-    projectDir: import.meta.dir,
   });
   return {
     chimpbase,

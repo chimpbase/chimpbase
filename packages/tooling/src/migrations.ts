@@ -9,6 +9,7 @@ import {
   type ChimpbaseMigrationsDefinition,
   type ChimpbaseProjectConfig,
 } from "@chimpbase/core";
+import { loadProjectAppDefinition } from "./app.ts";
 
 export interface SqlMigration extends ChimpbaseMigration {}
 
@@ -71,6 +72,14 @@ export async function loadProjectMigrations(
   engine: ChimpbaseProjectConfig["storage"]["engine"],
   options: { migrationsDir?: string | null } = {},
 ): Promise<SqlMigration[]> {
+  const app = await loadProjectAppDefinition(projectDir);
+  if (app) {
+    const appMigrations = [...listChimpbaseMigrationsForEngine(app.migrations, engine)];
+    if (appMigrations.length > 0) {
+      return appMigrations;
+    }
+  }
+
   const definedMigrations = await loadProjectMigrationsDefinition(projectDir);
   if (definedMigrations) {
     return [...listChimpbaseMigrationsForEngine(definedMigrations, engine)];
@@ -86,6 +95,14 @@ export async function loadProjectPostgresMigrations(
   projectDir: string,
   options: { migrationsDir?: string | null } = {},
 ): Promise<SqlMigration[]> {
+  const app = await loadProjectAppDefinition(projectDir);
+  if (app) {
+    const appMigrations = [...app.migrations.postgres];
+    if (appMigrations.length > 0) {
+      return appMigrations;
+    }
+  }
+
   const definedMigrations = await loadProjectMigrationsDefinition(projectDir);
   if (definedMigrations) {
     return [...definedMigrations.postgres];
@@ -106,7 +123,9 @@ export async function loadProjectMigrationsDefinition(
     return null;
   }
 
-  const moduleExports = await import(pathToFileURL(modulePath).href);
+  const moduleUrl = pathToFileURL(modulePath);
+  moduleUrl.searchParams.set("chimpbase_migrations", globalThis.crypto.randomUUID());
+  const moduleExports = await import(moduleUrl.href);
   return coerceProjectMigrationsDefinition(moduleExports, modulePath);
 }
 

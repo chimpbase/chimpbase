@@ -147,14 +147,11 @@ async function createSchemaFixture(label: string, migrationSql: string): Promise
 
   await mkdir(resolve(dir, "migrations/postgres"), { recursive: true });
   await writeFile(
-    resolve(dir, "chimpbase.toml"),
+    resolve(dir, "chimpbase.app.ts"),
     [
-      "[project]",
-      'name = "schema-test"',
-      "",
-      "[storage]",
-      'engine = "postgres"',
-      "",
+      "export default {",
+      '  project: { name: "schema-test" },',
+      "};",
     ].join("\n"),
   );
   await writeFile(resolve(dir, "migrations/postgres/001_init.sql"), migrationSql);
@@ -167,14 +164,14 @@ async function createTypedSchemaFixture(label: string, migrationSql: string): Pr
   cleanupDirs.push(dir);
 
   await writeFile(
-    resolve(dir, "chimpbase.toml"),
+    resolve(dir, "chimpbase.app.ts"),
     [
-      "[project]",
-      'name = "schema-test"',
+      'import migrations from "./chimpbase.migrations.ts";',
       "",
-      "[storage]",
-      'engine = "postgres"',
-      "",
+      "export default {",
+      '  migrations,',
+      '  project: { name: "schema-test" },',
+      "};",
     ].join("\n"),
   );
   await writeFile(

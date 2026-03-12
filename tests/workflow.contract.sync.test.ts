@@ -81,7 +81,7 @@ describe("workflow contract sync", () => {
 
     await runContractSync(projectDir);
 
-    await writeProjectFile(projectDir, "index.ts", createWorkflowIndex({
+    await writeProjectFile(projectDir, "chimpbase.app.ts", createWorkflowIndex({
       stateSchema: `
         {
           properties: {
@@ -140,7 +140,7 @@ describe("workflow contract sync", () => {
 
     await runContractSync(projectDir);
 
-    await writeProjectFile(projectDir, "index.ts", createWorkflowIndex({
+    await writeProjectFile(projectDir, "chimpbase.app.ts", createWorkflowIndex({
       stateSchema: `
         {
           properties: {
@@ -220,25 +220,13 @@ async function createWorkflowFixture(label: string, indexSource: string): Promis
           strict: true,
           target: "ES2022",
         },
-        include: ["index.ts"],
+        include: ["**/*.ts"],
       },
       null,
       2,
     ),
   );
-  await writeProjectFile(
-    dir,
-    "chimpbase.toml",
-    [
-      "[project]",
-      'name = "workflow-contract-sync"',
-      "",
-      "[storage]",
-      'engine = "memory"',
-      "",
-    ].join("\n"),
-  );
-  await writeProjectFile(dir, "index.ts", indexSource);
+  await writeProjectFile(dir, "chimpbase.app.ts", indexSource);
 
   return dir;
 }
@@ -249,7 +237,7 @@ function createWorkflowIndex(options: {
   version: number;
 }): string {
   return [
-    'import { register, workflow, workflowActionStep, workflowSleepStep } from "@chimpbase/runtime";',
+    'import { workflow, workflowActionStep, workflowSleepStep } from "@chimpbase/runtime";',
     "",
     "const onboardingWorkflow = workflow({",
     '  name: "customer.onboarding",',
@@ -268,12 +256,10 @@ function createWorkflowIndex(options: {
     "  ],",
     "});",
     "",
-    "register({",
-    "  registerAction(name, handler) { return globalThis.defineAction(name, handler); },",
-    "  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },",
-    "  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },",
-    "  registerWorkflow(definition) { return globalThis.defineWorkflow(definition); },",
-    "}, [onboardingWorkflow]);",
+    "export default {",
+    '  project: { name: "workflow-contract-sync" },',
+    "  registrations: [onboardingWorkflow],",
+    "};",
     "",
   ].join("\n");
 }

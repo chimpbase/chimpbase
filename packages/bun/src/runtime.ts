@@ -1,14 +1,15 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   ChimpbaseEngine,
   createDefaultChimpbasePlatformShim,
   listChimpbaseMigrationsForEngine,
-  type ChimpbaseEntrypointTarget,
   type ChimpbaseDrainOptions,
   type ChimpbaseDrainResult,
   type ChimpbaseEngineAdapter,
   type ChimpbaseEventBus,
+  normalizeProjectConfig,
+  type ChimpbaseAppDefinition,
   type ChimpbaseMigration,
   type ChimpbaseMigrationsDefinition,
   type ChimpbaseMigrationSource,
@@ -26,9 +27,14 @@ import {
   type ChimpbaseWorkerRegistration,
 } from "@chimpbase/core";
 import {
+  action as createActionEntry,
+  cron as createCronEntry,
   describeWorkflow,
   register as registerEntries,
   registerFrom as registerEntriesFrom,
+  subscription as createSubscriptionEntry,
+  workflow as createWorkflowEntry,
+  worker as createWorkerEntry,
   type ChimpbaseActionHandler,
   type ChimpbaseCronHandler,
   type ChimpbaseRegistration,
@@ -36,14 +42,13 @@ import {
   type ChimpbaseRouteHandler,
   type ChimpbaseSubscriptionHandler,
   type ChimpbaseSubscriptionOptions,
+  type ChimpbaseTelemetryPersistOption,
   type ChimpbaseWorkerDefinition,
   type ChimpbaseWorkerHandler,
   type ChimpbaseWorkflowContract,
   type ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
-import {
-  loadProjectConfig,
-} from "@chimpbase/tooling/config";
+import { loadProjectAppDefinition } from "@chimpbase/tooling/app";
 import {
   loadProjectMigrations,
 } from "@chimpbase/tooling/migrations";
@@ -71,9 +76,6 @@ import {
   ensureSqliteInternalTables,
   openSqliteDatabase,
 } from "./sqlite_adapter.ts";
-import {
-  loadChimpbaseEntrypoint,
-} from "./entrypoint_loader.ts";
 
 interface RouteRequestLike {
   headers: Headers;
@@ -98,8 +100,8 @@ export type DrainOptions = ChimpbaseDrainOptions;
 export type DrainResult = ChimpbaseDrainResult;
 
 export interface CreateHostOptions {
+  app?: ChimpbaseAppDefinition;
   config: ChimpbaseProjectConfig;
-  entrypointPath?: string;
   migrations?: ChimpbaseMigrationsDefinition;
   migrationSource?: ChimpbaseMigrationSource;
   migrationsDir?: string | null;
@@ -109,7 +111,7 @@ export interface CreateHostOptions {
   secrets?: ChimpbaseSecretsSource;
 }
 
-export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
+export class ChimpbaseBunHost {
   readonly config: ChimpbaseProjectConfig;
   readonly engine: ChimpbaseEngine;
   readonly platform: ChimpbasePlatformShim;
@@ -137,11 +139,11 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
 
   static async load(projectDirInput: string): Promise<ChimpbaseBunHost> {
     const projectDir = resolve(projectDirInput);
-    const config = await loadProjectConfig(projectDir);
+    const app = await loadProjectAppDefinitionOrThrow(projectDir);
+    const config = buildConfigFromApp(app);
     return await ChimpbaseBunHost.create({
+      app,
       config,
-      entrypointPath: projectDir,
-      migrationsDir: resolve(projectDir, "migrations"),
       projectDir,
     });
   }
@@ -154,8 +156,11 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
       projectDir,
       options.config,
       platform,
-      listChimpbaseMigrationsForEngine(options.migrations, options.config.storage.engine),
-      options.migrationSource ?? createLocalMigrationSource(projectDir, options.config, options.migrationsDir ?? null),
+      listChimpbaseMigrationsForEngine(options.app?.migrations ?? options.migrations, options.config.storage.engine),
+      options.migrationSource
+        ?? (options.app
+          ? createStaticMigrationSource([])
+          : createLocalMigrationSource(projectDir, options.config, options.migrationsDir ?? null)),
       options.migrationsSql ?? [],
     );
     const secrets = options.secrets ?? await loadLocalSecretStore(projectDir, options.config, {
@@ -177,8 +182,8 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
     });
     const host = new ChimpbaseBunHost(projectDir, options.config, platform, storage, engine, registry);
 
-    if (options.entrypointPath) {
-      await loadChimpbaseEntrypoint(options.entrypointPath, host);
+    if (options.app) {
+      applyChimpbaseApp(host, options.app);
     }
 
     if (options.config.telemetry.retention.enabled) {
@@ -230,6 +235,46 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
   registerFrom(...sources: object[]): this {
     registerEntriesFrom(this, ...sources);
     return this;
+  }
+
+  action<TArgs extends unknown[] = unknown[], TResult = unknown>(
+    name: string,
+    handler: ChimpbaseActionHandler<TArgs, TResult>,
+    options?: { telemetry?: ChimpbaseTelemetryPersistOption },
+  ): this {
+    return this.register(createActionEntry(name, handler, options));
+  }
+
+  subscription<TPayload = unknown, TResult = unknown>(
+    eventName: string,
+    handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+    options?: ChimpbaseSubscriptionOptions,
+  ): this {
+    return this.register(createSubscriptionEntry(eventName, handler, options));
+  }
+
+  worker<TPayload = unknown, TResult = unknown>(
+    name: string,
+    handler: ChimpbaseWorkerHandler<TPayload, TResult>,
+    definition?: ChimpbaseWorkerDefinition,
+    options?: { telemetry?: ChimpbaseTelemetryPersistOption },
+  ): this {
+    return this.register(createWorkerEntry(name, handler, definition, options));
+  }
+
+  cron<TResult = unknown>(
+    name: string,
+    schedule: string,
+    handler: ChimpbaseCronHandler<TResult>,
+    options?: { telemetry?: ChimpbaseTelemetryPersistOption },
+  ): this {
+    return this.register(createCronEntry(name, schedule, handler, options));
+  }
+
+  workflow<TInput = unknown, TState = unknown>(
+    definition: ChimpbaseWorkflowDefinition<TInput, TState>,
+  ): this {
+    return this.register(createWorkflowEntry(definition));
   }
 
   registerAction<TArgs extends unknown[] = unknown[], TResult = unknown>(
@@ -453,6 +498,83 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
   }
 }
 
+function applyChimpbaseApp(host: ChimpbaseBunHost, app: ChimpbaseAppDefinition): void {
+  if (app.registrations.length > 0) {
+    host.register(app.registrations);
+  }
+
+  host.setHttpHandler(app.httpHandler);
+}
+
+function buildConfigFromApp(app: ChimpbaseAppDefinition): ChimpbaseProjectConfig {
+  const storageEngine = inferStorageEngine();
+  return normalizeProjectConfig({
+    project: {
+      name: app.project.name,
+    },
+    server: {
+      port: inferServerPort(),
+    },
+    storage: {
+      engine: storageEngine,
+      path: storageEngine === "memory" || storageEngine === "postgres"
+        ? null
+        : Bun.env.CHIMPBASE_STORAGE_PATH ?? join("data", `${app.project.name}.db`),
+      url: Bun.env.CHIMPBASE_DATABASE_URL ?? Bun.env.DATABASE_URL ?? null,
+    },
+    telemetry: {
+      minLevel: app.telemetry.minLevel,
+      persist: app.telemetry.persist,
+    },
+    worker: {
+      leaseMs: inferNumberEnv("CHIMPBASE_WORKER_LEASE_MS"),
+      maxAttempts: app.worker.maxAttempts,
+      pollIntervalMs: inferNumberEnv("CHIMPBASE_WORKER_POLL_INTERVAL_MS"),
+      retryDelayMs: app.worker.retryDelayMs,
+    },
+    workflows: {
+      contractsDir: app.workflows.contractsDir ?? undefined,
+    },
+  });
+}
+
+async function loadProjectAppDefinitionOrThrow(projectDir: string): Promise<ChimpbaseAppDefinition> {
+  const app = await loadProjectAppDefinition(projectDir);
+  if (!app) {
+    throw new Error(`missing chimpbase.app.ts in ${projectDir}`);
+  }
+
+  return app;
+}
+
+function inferServerPort(): number {
+  const value = Bun.env.CHIMPBASE_SERVER_PORT ?? Bun.env.PORT;
+  const port = value ? Number(value) : NaN;
+  return Number.isFinite(port) ? port : 3000;
+}
+
+function inferStorageEngine(): "memory" | "postgres" | "sqlite" {
+  if (Bun.env.CHIMPBASE_STORAGE_ENGINE === "memory") {
+    return "memory";
+  }
+
+  if (Bun.env.CHIMPBASE_STORAGE_ENGINE === "postgres" || Bun.env.CHIMPBASE_DATABASE_URL || Bun.env.DATABASE_URL) {
+    return "postgres";
+  }
+
+  return "sqlite";
+}
+
+function inferNumberEnv(name: string): number | undefined {
+  const value = Bun.env[name];
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function getRouteKey(request: RouteRequestLike): string {
   return `${request.method.toUpperCase()} ${new URL(request.url).pathname}`;
 }
@@ -509,6 +631,14 @@ function createLocalMigrationSource(
   return {
     async list(): Promise<ChimpbaseMigration[]> {
       return await loadProjectMigrations(projectDir, config.storage.engine, { migrationsDir });
+    },
+  };
+}
+
+function createStaticMigrationSource(migrations: readonly ChimpbaseMigration[]): ChimpbaseMigrationSource {
+  return {
+    async list(): Promise<ChimpbaseMigration[]> {
+      return [...migrations];
     },
   };
 }

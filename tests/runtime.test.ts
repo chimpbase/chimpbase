@@ -50,17 +50,26 @@ describe("chimpbase-bun runtime", () => {
     process.env.CHIMPBASE_WORKER_RETRY_DELAY_MS = "1200";
 
     try {
+      await writeFile(
+        resolve(projectDir, "chimpbase.app.ts"),
+        [
+          "export default {",
+          '  project: { name: "explicit-app" },',
+          "  registrations: [],",
+          "};",
+        ].join("\n"),
+      );
       const host = await createChimpbase.from(projectDir, {});
 
-      expect(host.config.project.name).toBe("env-app");
+      expect(host.config.project.name).toBe("explicit-app");
       expect(host.config.server.port).toBe(4310);
       expect(host.config.storage.engine).toBe("memory");
       expect(host.config.storage.path).toBeNull();
       expect(host.config.worker).toEqual({
         leaseMs: 41000,
-        maxAttempts: 7,
+        maxAttempts: 5,
         pollIntervalMs: 500,
-        retryDelayMs: 1200,
+        retryDelayMs: 1000,
       });
 
       host.close();
@@ -174,22 +183,24 @@ describe("chimpbase-bun runtime", () => {
     cleanupDirs.push(projectDir);
 
     const host = await createChimpbase({
-      migrations: defineChimpbaseMigrations({
-        sqlite: [
-          defineChimpbaseMigration({
-            name: "001_worker_audit",
-            sql: "CREATE TABLE IF NOT EXISTS worker_audit (id INTEGER PRIMARY KEY, value TEXT NOT NULL);",
-          }),
-        ],
+      app: defineChimpbaseApp({
+        migrations: defineChimpbaseMigrations({
+          sqlite: [
+            defineChimpbaseMigration({
+              name: "001_worker_audit",
+              sql: "CREATE TABLE IF NOT EXISTS worker_audit (id INTEGER PRIMARY KEY, value TEXT NOT NULL);",
+            }),
+          ],
+        }),
+        project: { name: "typed-migrations" },
+        worker: {
+          retryDelayMs: 0,
+        },
       }),
-      project: { name: "typed-migrations" },
       projectDir,
       storage: {
         engine: "sqlite",
         path: "data/typed-migrations.db",
-      },
-      worker: {
-        retryDelayMs: 0,
       },
     });
 
@@ -223,11 +234,11 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
-  test("accepts code-first app definitions with registrations", async () => {
+  test("accepts inline app fields with registrations", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-app-definition-"));
     cleanupDirs.push(projectDir);
 
-    const app = defineChimpbaseApp({
+    const host = await createChimpbase({
       migrations: defineChimpbaseMigrations({
         sqlite: [
           defineChimpbaseMigration({
@@ -236,6 +247,7 @@ describe("chimpbase-bun runtime", () => {
           }),
         ],
       }),
+      projectDir,
       project: { name: "app-definition" },
       registrations: [
         {
@@ -267,11 +279,6 @@ describe("chimpbase-bun runtime", () => {
           name: "audit.job",
         },
       ],
-    });
-
-    const host = await createChimpbase({
-      app,
-      projectDir,
       storage: {
         engine: "sqlite",
         path: "data/app-definition.db",
@@ -295,6 +302,50 @@ describe("chimpbase-bun runtime", () => {
 
       const audit = await host.executeAction("listAudit");
       expect(audit.result).toEqual([{ value: "from-app" }]);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("supports host action and worker registration helpers", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-host-helpers-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      storage: {
+        engine: "memory",
+      },
+    });
+
+    host
+      .action("enqueueAudit", async (ctx, value) => {
+        await ctx.queue.enqueue("audit.job", { value });
+        return { queued: value };
+      })
+      .action(
+        "listAudit",
+        async (ctx) => await ctx.collection.find("audit_log"),
+      )
+      .worker("audit.job", async (ctx, payload) => {
+        await ctx.collection.insert("audit_log", { value: (payload as { value: string }).value });
+      });
+
+    try {
+      const queued = await host.executeAction("enqueueAudit", ["from-helper"]);
+      expect(queued.result).toEqual({ queued: "from-helper" });
+
+      expect(await host.drain()).toEqual({
+        cronSchedules: 0,
+        idle: true,
+        queueJobs: 1,
+        runs: 1,
+        stopReason: "idle",
+      });
+
+      const audit = await host.executeAction("listAudit");
+      expect(audit.result).toEqual([
+        expect.objectContaining({ value: "from-helper" }),
+      ]);
     } finally {
       host.close();
     }
@@ -368,35 +419,26 @@ describe("chimpbase-bun runtime", () => {
 
   test("preloads secrets from mounted files before env vars and .env", async () => {
     const previousToken = process.env.APP_TOKEN;
+    const previousSecretsDir = process.env.CHIMPBASE_SECRETS_DIR;
     const projectDir = await createInlineFixture("secrets-mounted", {
-      "index.ts": [
-        'import { action, register } from "@chimpbase/runtime";',
+      "chimpbase.app.ts": [
+        'import { action } from "@chimpbase/runtime";',
         "",
-        "register({",
-        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-        "}, [",
-        '  action("readSecret", async (ctx, name) => ctx.secret(name)),',
-        "]);",
+        "export default {",
+        '  project: { name: "secrets-mounted" },',
+        "  registrations: [",
+        '    action("readSecret", async (ctx, name) => ctx.secret(name)),',
+        "  ],",
+        "};",
       ].join("\n"),
-    }, [
-      "[project]",
-      'name = "secrets-mounted"',
-      "",
-      "[storage]",
-      'engine = "memory"',
-      "",
-      "[secrets]",
-      'dir = "run/secrets"',
-      "",
-    ]);
+    }, []);
 
     try {
       await writeFile(resolve(projectDir, ".env"), "APP_TOKEN=dotenv-token\n");
       await mkdir(resolve(projectDir, "run/secrets"), { recursive: true });
       await writeFile(resolve(projectDir, "run/secrets/APP_TOKEN"), "mounted-token");
       process.env.APP_TOKEN = "env-token";
+      process.env.CHIMPBASE_SECRETS_DIR = "run/secrets";
 
       const host = await ChimpbaseBunHost.load(projectDir);
 
@@ -407,6 +449,11 @@ describe("chimpbase-bun runtime", () => {
         host.close();
       }
     } finally {
+      if (previousSecretsDir === undefined) {
+        delete process.env.CHIMPBASE_SECRETS_DIR;
+      } else {
+        process.env.CHIMPBASE_SECRETS_DIR = previousSecretsDir;
+      }
       if (previousToken === undefined) {
         delete process.env.APP_TOKEN;
       } else {
@@ -418,25 +465,17 @@ describe("chimpbase-bun runtime", () => {
   test("falls back to .env secrets when mounted files and env vars are absent", async () => {
     const previousToken = process.env.APP_TOKEN;
     const projectDir = await createInlineFixture("secrets-dotenv", {
-      "index.ts": [
-        'import { action, register } from "@chimpbase/runtime";',
+      "chimpbase.app.ts": [
+        'import { action } from "@chimpbase/runtime";',
         "",
-        "register({",
-        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-        "}, [",
-        '  action("readSecret", async (ctx, name) => ctx.secret(name)),',
-        "]);",
+        "export default {",
+        '  project: { name: "secrets-dotenv" },',
+        "  registrations: [",
+        '    action("readSecret", async (ctx, name) => ctx.secret(name)),',
+        "  ],",
+        "};",
       ].join("\n"),
-    }, [
-      "[project]",
-      'name = "secrets-dotenv"',
-      "",
-      "[storage]",
-      'engine = "memory"',
-      "",
-    ]);
+    }, []);
 
     try {
       delete process.env.APP_TOKEN;
@@ -567,8 +606,8 @@ describe("chimpbase-bun runtime", () => {
 
   test("executes durable workflows across sleep and signal boundaries", async () => {
     const projectDir = await createInlineFixture("workflow-mvp", {
-      "index.ts": [
-        'import { action, register, workflow, workflowActionStep, workflowSleepStep, workflowWaitForSignalStep } from "@chimpbase/runtime";',
+      "chimpbase.app.ts": [
+        'import { action, workflow, workflowActionStep, workflowSleepStep, workflowWaitForSignalStep } from "@chimpbase/runtime";',
         "",
         "const onboardingWorkflow = workflow({",
         '    name: "customer.onboarding",',
@@ -599,41 +638,31 @@ describe("chimpbase-bun runtime", () => {
         "    ],",
         "});",
         "",
-        "register({",
-        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-        '  registerWorkflow(definition) { return globalThis.defineWorkflow(definition); },',
-        "}, [",
-        "  onboardingWorkflow,",
-        '  action("provisionCustomer", async (ctx, customerId) => {',
-        '    await ctx.collection.insert("workflow_audit", { customerId, step: "provision" });',
-        '    return { status: "ok" };',
-        "  }),",
-        '  action("activateCustomer", async (ctx, customerId) => {',
-        '    await ctx.collection.insert("workflow_audit", { customerId, step: "activate" });',
-        '    return { status: "ok" };',
-        "  }),",
-        '  action("startOnboarding", async (ctx, customerId) => {',
-        '    return await ctx.workflow.start("customer.onboarding", { customerId }, { workflowId: `workflow:${customerId}` });',
-        "  }),",
-        '  action("signalKickoffCompleted", async (ctx, customerId, completedAt) => {',
-        '    await ctx.workflow.signal(`workflow:${customerId}`, "kickoff.completed", { completedAt });',
-        "    return { ok: true };",
-        "  }),",
-        '  action("getOnboarding", async (ctx, customerId) => await ctx.workflow.get(`workflow:${customerId}`)),',
-        '  action("listWorkflowAudit", async (ctx) => await ctx.collection.find("workflow_audit")),',
-        "]);",
+        "export default {",
+        '  project: { name: "workflow-mvp" },',
+        "  registrations: [",
+        "    onboardingWorkflow,",
+        '    action("provisionCustomer", async (ctx, customerId) => {',
+        '      await ctx.collection.insert("workflow_audit", { customerId, step: "provision" });',
+        '      return { status: "ok" };',
+        "    }),",
+        '    action("activateCustomer", async (ctx, customerId) => {',
+        '      await ctx.collection.insert("workflow_audit", { customerId, step: "activate" });',
+        '      return { status: "ok" };',
+        "    }),",
+        '    action("startOnboarding", async (ctx, customerId) => {',
+        '      return await ctx.workflow.start("customer.onboarding", { customerId }, { workflowId: `workflow:${customerId}` });',
+        "    }),",
+        '    action("signalKickoffCompleted", async (ctx, customerId, completedAt) => {',
+        '      await ctx.workflow.signal(`workflow:${customerId}`, "kickoff.completed", { completedAt });',
+        "      return { ok: true };",
+        "    }),",
+        '    action("getOnboarding", async (ctx, customerId) => await ctx.workflow.get(`workflow:${customerId}`)),',
+        '    action("listWorkflowAudit", async (ctx) => await ctx.collection.find("workflow_audit")),',
+        "  ],",
+        "};",
       ].join("\n"),
-    }, [
-      "[project]",
-      'name = "workflow-mvp"',
-      "",
-      "[storage]",
-      'engine = "sqlite"',
-      'path = "data/workflow.db"',
-      "",
-    ]);
+    }, []);
 
     const host = await ChimpbaseBunHost.load(projectDir);
 
@@ -705,8 +734,8 @@ describe("chimpbase-bun runtime", () => {
 
   test("executes imperative durable workflows with switch-based state transitions", async () => {
     const projectDir = await createInlineFixture("workflow-imperative", {
-      "index.ts": [
-        'import { action, register, workflow } from "@chimpbase/runtime";',
+      "chimpbase.app.ts": [
+        'import { action, workflow } from "@chimpbase/runtime";',
         "",
         "const onboardingWorkflow = workflow({",
         '  name: "customer.onboarding.machine",',
@@ -750,41 +779,31 @@ describe("chimpbase-bun runtime", () => {
         "  },",
         "});",
         "",
-        "register({",
-        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-        '  registerWorkflow(definition) { return globalThis.defineWorkflow(definition); },',
-        "}, [",
-        "  onboardingWorkflow,",
-        '  action("provisionCustomer", async (ctx, customerId) => {',
-        '    await ctx.collection.insert("workflow_machine_audit", { customerId, step: "provision" });',
-        '    return { status: "ok" };',
-        "  }),",
-        '  action("activateCustomer", async (ctx, customerId) => {',
-        '    await ctx.collection.insert("workflow_machine_audit", { customerId, step: "activate" });',
-        '    return { status: "ok" };',
-        "  }),",
-        '  action("startOnboardingMachine", async (ctx, customerId) => {',
-        '    return await ctx.workflow.start("customer.onboarding.machine", { customerId }, { workflowId: `workflow-machine:${customerId}` });',
-        "  }),",
-        '  action("signalMachineKickoffCompleted", async (ctx, customerId, completedAt) => {',
-        '    await ctx.workflow.signal(`workflow-machine:${customerId}`, "kickoff.completed", { completedAt });',
-        "    return { ok: true };",
-        "  }),",
-        '  action("getOnboardingMachine", async (ctx, customerId) => await ctx.workflow.get(`workflow-machine:${customerId}`)),',
-        '  action("listWorkflowMachineAudit", async (ctx) => await ctx.collection.find("workflow_machine_audit")),',
-        "]);",
+        "export default {",
+        '  project: { name: "workflow-imperative" },',
+        "  registrations: [",
+        "    onboardingWorkflow,",
+        '    action("provisionCustomer", async (ctx, customerId) => {',
+        '      await ctx.collection.insert("workflow_machine_audit", { customerId, step: "provision" });',
+        '      return { status: "ok" };',
+        "    }),",
+        '    action("activateCustomer", async (ctx, customerId) => {',
+        '      await ctx.collection.insert("workflow_machine_audit", { customerId, step: "activate" });',
+        '      return { status: "ok" };',
+        "    }),",
+        '    action("startOnboardingMachine", async (ctx, customerId) => {',
+        '      return await ctx.workflow.start("customer.onboarding.machine", { customerId }, { workflowId: `workflow-machine:${customerId}` });',
+        "    }),",
+        '    action("signalMachineKickoffCompleted", async (ctx, customerId, completedAt) => {',
+        '      await ctx.workflow.signal(`workflow-machine:${customerId}`, "kickoff.completed", { completedAt });',
+        "      return { ok: true };",
+        "    }),",
+        '    action("getOnboardingMachine", async (ctx, customerId) => await ctx.workflow.get(`workflow-machine:${customerId}`)),',
+        '    action("listWorkflowMachineAudit", async (ctx) => await ctx.collection.find("workflow_machine_audit")),',
+        "  ],",
+        "};",
       ].join("\n"),
-    }, [
-      "[project]",
-      'name = "workflow-imperative"',
-      "",
-      "[storage]",
-      'engine = "sqlite"',
-      'path = "data/workflow-imperative.db"',
-      "",
-    ]);
+    }, []);
 
     const host = await ChimpbaseBunHost.load(projectDir);
 
@@ -862,44 +881,38 @@ describe("chimpbase-bun runtime", () => {
     Date.now = () => now;
 
     const projectDir = await createInlineFixture("cron", {
-      "index.ts": [
-        'import { action, cron, register } from "@chimpbase/runtime";',
+      "chimpbase.app.ts": [
+        'import { action, cron } from "@chimpbase/runtime";',
         "",
-        "register({",
-        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-        '  registerCron(name, schedule, handler) { return globalThis.defineCron(name, schedule, handler); },',
-        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-        "}, [",
-        '  cron("billing.rollup", "*/5 * * * *", async (ctx, invocation) => {',
-        '    const shouldFail = await ctx.kv.get("cron:billing.rollup:fail");',
-        '    if (shouldFail) {',
-        '      throw new Error("boom");',
-        "    }",
-        "    await ctx.query(",
-        '      "INSERT INTO cron_audit (schedule_name, fire_at_ms, fire_at_iso) VALUES (?1, ?2, ?3)",',
-        "      [invocation.name, invocation.fireAtMs, invocation.fireAt],",
-        "    );",
-        "  }),",
-        '  action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms, fire_at_iso FROM cron_audit ORDER BY fire_at_ms ASC")),',
-        '  action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
-        '  action("setCronFailure", async (ctx, enabled) => {',
-        "    if (enabled) {",
-        '      await ctx.kv.set("cron:billing.rollup:fail", true);',
-        "    } else {",
-        '      await ctx.kv.delete("cron:billing.rollup:fail");',
-        "    }",
-        "    return { enabled };",
-        "  }),",
-        "]);",
-      ].join("\n"),
-      "migrations/001_init.sql": [
-        "CREATE TABLE IF NOT EXISTS cron_audit (",
-        "  id INTEGER PRIMARY KEY,",
-        "  schedule_name TEXT NOT NULL,",
-        "  fire_at_ms INTEGER NOT NULL,",
-        "  fire_at_iso TEXT NOT NULL",
-        ");",
+        "export default {",
+        '  migrations: {',
+        '    sqlite: [{ name: "001_init", sql: "CREATE TABLE IF NOT EXISTS cron_audit (id INTEGER PRIMARY KEY, schedule_name TEXT NOT NULL, fire_at_ms INTEGER NOT NULL, fire_at_iso TEXT NOT NULL);" }],',
+        "  },",
+        '  project: { name: "cron-test" },',
+        '  worker: { retryDelayMs: 0 },',
+        "  registrations: [",
+        '    cron("billing.rollup", "*/5 * * * *", async (ctx, invocation) => {',
+        '      const shouldFail = await ctx.kv.get("cron:billing.rollup:fail");',
+        '      if (shouldFail) {',
+        '        throw new Error("boom");',
+        "      }",
+        "      await ctx.query(",
+        '        "INSERT INTO cron_audit (schedule_name, fire_at_ms, fire_at_iso) VALUES (?1, ?2, ?3)",',
+        "        [invocation.name, invocation.fireAtMs, invocation.fireAt],",
+        "      );",
+        "    }),",
+        '    action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms, fire_at_iso FROM cron_audit ORDER BY fire_at_ms ASC")),',
+        '    action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
+        '    action("setCronFailure", async (ctx, enabled) => {',
+        "      if (enabled) {",
+        '        await ctx.kv.set("cron:billing.rollup:fail", true);',
+        "      } else {",
+        '        await ctx.kv.delete("cron:billing.rollup:fail");',
+        "      }",
+        "      return { enabled };",
+        "    }),",
+        "  ],",
+        "};",
       ].join("\n"),
     }, [
       "[project]",
@@ -1015,47 +1028,44 @@ describe("chimpbase-bun runtime", () => {
 
   test("routes failed jobs to a custom dlq", async () => {
     const projectDir = await createInlineFixture("dlq", {
-      "index.ts": [
-        'import { action, worker, register } from "@chimpbase/runtime";',
+      "chimpbase.app.ts": [
+        'import { action, worker } from "@chimpbase/runtime";',
         "",
-        'const entries = [',
-        'action("enqueueExplodingJob", async (ctx) => {',
-        '  await ctx.queue.enqueue("todo.explodes", { todoId: 7 });',
-        "  return null;",
-        "}),",
+        "export default {",
+        "  migrations: {",
+        '    sqlite: [{ name: "001_init", sql: "CREATE TABLE IF NOT EXISTS dlq_captures (id INTEGER PRIMARY KEY, queue_name TEXT NOT NULL, error_message TEXT NOT NULL, attempts INTEGER NOT NULL);" }],',
+        "  },",
+        '  project: { name: "dlq-test" },',
+        "  worker: {",
+        "    maxAttempts: 2,",
+        "    retryDelayMs: 0,",
+        "  },",
+        '  registrations: [',
+        '    action("enqueueExplodingJob", async (ctx) => {',
+        '      await ctx.queue.enqueue("todo.explodes", { todoId: 7 });',
+        "      return null;",
+        "    }),",
         "",
-        'worker("todo.explodes", async () => {',
-        '  throw new Error("boom");',
-        "}, {",
-        '  dlq: "todo.explodes.failed"',
-        "}),",
+        '    worker("todo.explodes", async () => {',
+        '      throw new Error("boom");',
+        "    }, {",
+        '      dlq: "todo.explodes.failed"',
+        "    }),",
         "",
-        'worker("todo.explodes.failed", async (ctx, envelope) => {',
-        "  await ctx.query(",
-        '    "INSERT INTO dlq_captures (queue_name, error_message, attempts) VALUES (?1, ?2, ?3)",',
-        "    [envelope.queue, envelope.error, envelope.attempts],",
-        "  );",
-        "}, {",
-        "  dlq: false,",
-        "}),",
+        '    worker("todo.explodes.failed", async (ctx, envelope) => {',
+        "      await ctx.query(",
+        '        "INSERT INTO dlq_captures (queue_name, error_message, attempts) VALUES (?1, ?2, ?3)",',
+        "        [envelope.queue, envelope.error, envelope.attempts],",
+        "      );",
+        "    }, {",
+        "      dlq: false,",
+        "    }),",
         "",
-        'action("listDlqCaptures", async (ctx) => {',
-        '  return await ctx.query("SELECT queue_name, error_message, attempts FROM dlq_captures ORDER BY id ASC");',
-        "}),",
-        "];",
-        'register({',
-        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-        '}, entries);',
-      ].join("\n"),
-      "migrations/001_init.sql": [
-        "CREATE TABLE IF NOT EXISTS dlq_captures (",
-        "  id INTEGER PRIMARY KEY,",
-        "  queue_name TEXT NOT NULL,",
-        "  error_message TEXT NOT NULL,",
-        "  attempts INTEGER NOT NULL",
-        ");",
+        '    action("listDlqCaptures", async (ctx) => {',
+        '      return await ctx.query("SELECT queue_name, error_message, attempts FROM dlq_captures ORDER BY id ASC");',
+        "    }),",
+        "  ],",
+        "};",
       ].join("\n"),
     }, [
       "[project]",
@@ -1093,8 +1103,8 @@ describe("chimpbase-bun runtime", () => {
 
   test("registers actions, subscriptions and workers with decorators", async () => {
     const projectDir = await createInlineFixture("decorators", {
-      "index.ts": [
-        'import { Action, Worker, Subscription, registerFrom } from "@chimpbase/runtime";',
+      "chimpbase.app.ts": [
+        'import { Action, Worker, Subscription, registrationsFrom } from "@chimpbase/runtime";',
         "",
         "class DecoratedTodoModule {",
         '  @Action("createDecoratedTodo")',
@@ -1121,23 +1131,13 @@ describe("chimpbase-bun runtime", () => {
         "  }",
         "}",
         "",
-        "registerFrom({",
-        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-        "}, DecoratedTodoModule);",
-      ].join("\n"),
-      "migrations/001_init.sql": [
-        "CREATE TABLE IF NOT EXISTS decorated_todos (",
-        "  id INTEGER PRIMARY KEY,",
-        "  title TEXT NOT NULL",
-        ");",
-        "",
-        "CREATE TABLE IF NOT EXISTS decorated_audit (",
-        "  id INTEGER PRIMARY KEY,",
-        "  todo_id INTEGER NOT NULL,",
-        "  title TEXT NOT NULL",
-        ");",
+        "export default {",
+        "  migrations: {",
+        '    sqlite: [{ name: "001_init", sql: "CREATE TABLE IF NOT EXISTS decorated_todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE IF NOT EXISTS decorated_audit (id INTEGER PRIMARY KEY, todo_id INTEGER NOT NULL, title TEXT NOT NULL);" }],',
+        "  },",
+        '  project: { name: "decorator-test" },',
+        "  registrations: registrationsFrom(DecoratedTodoModule),",
+        "};",
       ].join("\n"),
     }, [
       "[project]",
@@ -1174,8 +1174,8 @@ describe("chimpbase-bun runtime", () => {
 
   test("registers instance methods with decorators", async () => {
     const projectDir = await createInlineFixture("decorator-instances", {
-      "index.ts": [
-        'import { Action, Worker, Subscription, registerFrom } from "@chimpbase/runtime";',
+      "chimpbase.app.ts": [
+        'import { Action, Worker, Subscription, registrationsFrom } from "@chimpbase/runtime";',
         "",
         "class InstanceDecoratedTodoModule {",
         '  @Action("createInstanceDecoratedTodo")',
@@ -1203,23 +1203,14 @@ describe("chimpbase-bun runtime", () => {
         "}",
         "",
         "const moduleInstance = new InstanceDecoratedTodoModule();",
-        "registerFrom({",
-        '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-        '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-        '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-        "}, moduleInstance);",
-      ].join("\n"),
-      "migrations/001_init.sql": [
-        "CREATE TABLE IF NOT EXISTS instance_decorated_todos (",
-        "  id INTEGER PRIMARY KEY,",
-        "  title TEXT NOT NULL",
-        ");",
         "",
-        "CREATE TABLE IF NOT EXISTS instance_decorated_audit (",
-        "  id INTEGER PRIMARY KEY,",
-        "  todo_id INTEGER NOT NULL,",
-        "  title TEXT NOT NULL",
-        ");",
+        "export default {",
+        "  migrations: {",
+        '    sqlite: [{ name: "001_init", sql: "CREATE TABLE IF NOT EXISTS instance_decorated_todos (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE IF NOT EXISTS instance_decorated_audit (id INTEGER PRIMARY KEY, todo_id INTEGER NOT NULL, title TEXT NOT NULL);" }],',
+        "  },",
+        '  project: { name: "decorator-instance-test" },',
+        "  registrations: registrationsFrom(moduleInstance),",
+        "};",
       ].join("\n"),
     }, [
       "[project]",
@@ -1362,49 +1353,50 @@ async function createFixture(label: string): Promise<string> {
   await cp(resolve(exampleDir, "migrations"), resolve(dir, "migrations"), { recursive: true });
   await cp(resolve(exampleDir, "chimpbase.migrations.ts"), resolve(dir, "chimpbase.migrations.ts"));
   await writeFile(
-    resolve(dir, "index.ts"),
+    resolve(dir, "chimpbase.app.ts"),
     [
       'import { todoApiApp } from "./src/http/app.ts";',
-      'export const fetch = todoApiApp.fetch.bind(todoApiApp);',
-      'export { todoApiApp as app };',
-      'import { action, worker, register, subscription } from "@chimpbase/runtime";',
+      'import migrations from "./chimpbase.migrations.ts";',
+      'import { action, worker, subscription } from "@chimpbase/runtime";',
       'import { createProject, listProjects } from "./src/modules/projects/project.actions.ts";',
       'import { assignTodo, completeTodo, createTodo, getTodoDashboard, listTodos, startTodo } from "./src/modules/todos/todo.actions.ts";',
       'import { listTodoAuditLog, listTodoEvents, listTodoNotifications } from "./src/modules/todos/todo.audit.actions.ts";',
-        'import { auditTodoAssigned, auditTodoCompleted, auditTodoCreated, auditTodoStarted, enqueueTodoCompletedNotification } from "./src/modules/todos/todo.subscriptions.ts";',
+      'import { auditTodoAssigned, auditTodoCompleted, auditTodoCreated, auditTodoStarted, enqueueTodoCompletedNotification } from "./src/modules/todos/todo.subscriptions.ts";',
       'import { addTodoNote, listTodoActivityStream, listTodoNotes, listWorkspacePreferences, setWorkspacePreference } from "./src/modules/todos/todo.platform.actions.ts";',
       'import { captureTodoCompletedDlq, notifyTodoCompleted } from "./src/modules/todos/todo.workers.ts";',
       'import { seedDemoWorkspace } from "./src/modules/todos/todo.seed.actions.ts";',
-      'register({',
-      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-      '}, [',
-      '  action("listProjects", listProjects),',
-      '  action("createProject", createProject),',
-      '  action("listTodos", listTodos),',
-      '  action("createTodo", createTodo),',
-      '  action("assignTodo", assignTodo),',
-      '  action("startTodo", startTodo),',
-      '  action("completeTodo", completeTodo),',
-      '  action("getTodoDashboard", getTodoDashboard),',
-      '  action("listTodoAuditLog", listTodoAuditLog),',
-      '  action("listTodoEvents", listTodoEvents),',
-      '  action("listTodoNotifications", listTodoNotifications),',
-      '  subscription("todo.created", auditTodoCreated),',
-      '  subscription("todo.assigned", auditTodoAssigned),',
-      '  subscription("todo.started", auditTodoStarted),',
-      '  subscription("todo.completed", auditTodoCompleted),',
-      '  subscription("todo.completed", enqueueTodoCompletedNotification),',
-      '  action("listWorkspacePreferences", listWorkspacePreferences),',
-      '  action("setWorkspacePreference", setWorkspacePreference),',
-      '  action("addTodoNote", addTodoNote),',
-      '  action("listTodoNotes", listTodoNotes),',
-      '  action("listTodoActivityStream", listTodoActivityStream),',
-      '  worker("todo.completed.notify", notifyTodoCompleted),',
-      '  worker("todo.completed.notify.dlq", captureTodoCompletedDlq, { dlq: false }),',
-      '  action("seedDemoWorkspace", seedDemoWorkspace),',
-      ']);',
+      '',
+      'export default {',
+      '  httpHandler: todoApiApp,',
+      '  migrations,',
+      '  project: { name: "todo-ts-bun-test" },',
+      '  registrations: [',
+      '    action("listProjects", listProjects),',
+      '    action("createProject", createProject),',
+      '    action("listTodos", listTodos),',
+      '    action("createTodo", createTodo),',
+      '    action("assignTodo", assignTodo),',
+      '    action("startTodo", startTodo),',
+      '    action("completeTodo", completeTodo),',
+      '    action("getTodoDashboard", getTodoDashboard),',
+      '    action("listTodoAuditLog", listTodoAuditLog),',
+      '    action("listTodoEvents", listTodoEvents),',
+      '    action("listTodoNotifications", listTodoNotifications),',
+      '    subscription("todo.created", auditTodoCreated),',
+      '    subscription("todo.assigned", auditTodoAssigned),',
+      '    subscription("todo.started", auditTodoStarted),',
+      '    subscription("todo.completed", auditTodoCompleted),',
+      '    subscription("todo.completed", enqueueTodoCompletedNotification),',
+      '    action("listWorkspacePreferences", listWorkspacePreferences),',
+      '    action("setWorkspacePreference", setWorkspacePreference),',
+      '    action("addTodoNote", addTodoNote),',
+      '    action("listTodoNotes", listTodoNotes),',
+      '    action("listTodoActivityStream", listTodoActivityStream),',
+      '    worker("todo.completed.notify", notifyTodoCompleted),',
+      '    worker("todo.completed.notify.dlq", captureTodoCompletedDlq, { dlq: false }),',
+      '    action("seedDemoWorkspace", seedDemoWorkspace),',
+      '  ],',
+      '};',
     ].join("\n"),
   );
   await writeFile(resolve(dir, "tsconfig.json"), await Bun.file(resolve(exampleDir, "tsconfig.json")).text());
@@ -1433,22 +1425,6 @@ async function createFixture(label: string): Promise<string> {
       2,
     ),
   );
-  await writeFile(
-    resolve(dir, "chimpbase.toml"),
-    [
-      "[project]",
-      'name = "todo-ts-bun-test"',
-      "",
-      "[storage]",
-      'engine = "sqlite"',
-      'path = "data/test.db"',
-      "",
-      "[server]",
-      "port = 39001",
-      "",
-    ].join("\n"),
-  );
-
   await cp(resolve(exampleDir, "node_modules/hono"), resolve(dir, "node_modules/hono"), { recursive: true });
 
   return dir;
@@ -1467,7 +1443,7 @@ function restoreEnv(previousEnv: Record<string, string | undefined>): void {
 async function createInlineFixture(
   label: string,
   files: Record<string, string>,
-  configLines: string[],
+  _configLines: string[],
 ): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), `chimpbase-bun-inline-${label}-`));
   cleanupDirs.push(dir);
@@ -1507,7 +1483,7 @@ async function createInlineFixture(
           strict: true,
           target: "ES2022",
         },
-        include: ["index.ts"],
+        include: ["**/*.ts"],
       },
       null,
       2,
@@ -1521,9 +1497,6 @@ async function createInlineFixture(
   }
 
   await mkdir(resolve(dir, "data"), { recursive: true });
-  if (configLines.length > 0) {
-    await writeFile(resolve(dir, "chimpbase.toml"), configLines.join("\n"));
-  }
 
   return dir;
 }

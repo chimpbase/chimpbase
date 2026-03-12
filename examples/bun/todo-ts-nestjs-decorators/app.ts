@@ -1,6 +1,6 @@
 import { NestFactory } from "@nestjs/core";
 import "reflect-metadata";
-import { createChimpbase, defineChimpbaseApp } from "@chimpbase/bun";
+import { createChimpbase } from "@chimpbase/bun";
 import { registrationsFrom } from "@chimpbase/runtime";
 
 import migrations from "./chimpbase.migrations.ts";
@@ -24,9 +24,10 @@ export async function createTodoApplication() {
   const todoSubscriptions = nestApp.get(TodoSubscriptionsService);
   const todoWorkers = nestApp.get(TodoWorkersService);
 
-  const app = defineChimpbaseApp({
+  const chimpbase = await createChimpbase({
     httpHandler: todoApiApp,
     migrations,
+    projectDir: import.meta.dir,
     project: {
       name: "todo-ts-nestjs-decorators",
     },
@@ -36,10 +37,6 @@ export async function createTodoApplication() {
       todoSubscriptions,
       todoWorkers,
     ),
-  });
-  const chimpbase = await createChimpbase({
-    app,
-    projectDir: import.meta.dir,
   });
   return {
     chimpbase,

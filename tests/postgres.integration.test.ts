@@ -3,7 +3,7 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { ChimpbaseBunHost } from "../packages/bun/src/runtime.ts";
+import { createChimpbase } from "../packages/bun/src/library.ts";
 import {
   createProjectFixture as createTodoTsDecoratorsFixture,
   runAction as runTodoTsDecoratorsAction,
@@ -62,7 +62,9 @@ if (!dockerAvailable) {
     test("executes actions, routes, queues and primitives via ChimpbaseBunHost.load", async () => {
       const database = await postgres.createDatabase("runtime");
       const projectDir = await createRuntimeFixture("runtime", database.url);
-      const host = await ChimpbaseBunHost.load(projectDir);
+      const host = await createChimpbase.from(projectDir, {
+        storage: { engine: "postgres", url: database.url },
+      });
 
       try {
         await host.executeAction("seedDemoWorkspace");
@@ -144,7 +146,9 @@ if (!dockerAvailable) {
     test("executes ctx.db() via Kysely while keeping ctx.query() available", async () => {
       const database = await postgres.createDatabase("kysely");
       const projectDir = await createKyselyFixture("kysely", database.url);
-      const host = await ChimpbaseBunHost.load(projectDir);
+      const host = await createChimpbase.from(projectDir, {
+        storage: { engine: "postgres", url: database.url },
+      });
 
       try {
         const created = await host.executeAction("createAccount", ["alice@postgres.test", "Alice"]);
@@ -180,7 +184,9 @@ if (!dockerAvailable) {
     test("executes durable workflows via ChimpbaseBunHost.load on Postgres", async () => {
       const database = await postgres.createDatabase("workflow");
       const projectDir = await createWorkflowFixture("workflow", database.url);
-      const host = await ChimpbaseBunHost.load(projectDir);
+      const host = await createChimpbase.from(projectDir, {
+        storage: { engine: "postgres", url: database.url },
+      });
 
       try {
         const started = await host.executeAction("startOnboarding", ["cus_pg"]);
@@ -235,7 +241,9 @@ if (!dockerAvailable) {
     test("executes imperative durable workflows via ChimpbaseBunHost.load on Postgres", async () => {
       const database = await postgres.createDatabase("workflow_machine");
       const projectDir = await createImperativeWorkflowFixture("workflow-machine", database.url);
-      const host = await ChimpbaseBunHost.load(projectDir);
+      const host = await createChimpbase.from(projectDir, {
+        storage: { engine: "postgres", url: database.url },
+      });
 
       try {
         const started = await host.executeAction("startOnboardingMachine", ["vip_pg"]);
@@ -296,7 +304,9 @@ if (!dockerAvailable) {
 
       const database = await postgres.createDatabase("cron");
       const projectDir = await createCronFixture("cron", database.url);
-      const host = await ChimpbaseBunHost.load(projectDir);
+      const host = await createChimpbase.from(projectDir, {
+        storage: { engine: "postgres", url: database.url },
+      });
 
       try {
         await host.syncCronSchedules();
@@ -464,12 +474,11 @@ async function createRuntimeFixture(label: string, databaseUrl: string): Promise
   await cp(resolve(exampleDir, "migrations"), resolve(dir, "migrations"), { recursive: true });
   await cp(resolve(exampleDir, "chimpbase.migrations.ts"), resolve(dir, "chimpbase.migrations.ts"));
   await writeFile(
-    resolve(dir, "index.ts"),
+    resolve(dir, "chimpbase.app.ts"),
     [
       'import { todoApiApp } from "./src/http/app.ts";',
-      'export const fetch = todoApiApp.fetch.bind(todoApiApp);',
-      'export { todoApiApp as app };',
-      'import { action, worker, register, subscription } from "@chimpbase/runtime";',
+      'import migrations from "./chimpbase.migrations.ts";',
+      'import { action, worker, subscription } from "@chimpbase/runtime";',
       'import { createProject, listProjects } from "./src/modules/projects/project.actions.ts";',
       'import { assignTodo, completeTodo, createTodo, getTodoDashboard, listTodos, startTodo } from "./src/modules/todos/todo.actions.ts";',
       'import { listTodoAuditLog, listTodoEvents, listTodoNotifications } from "./src/modules/todos/todo.audit.actions.ts";',
@@ -477,36 +486,38 @@ async function createRuntimeFixture(label: string, databaseUrl: string): Promise
       'import { addTodoNote, listTodoActivityStream, listTodoNotes, listWorkspacePreferences, setWorkspacePreference } from "./src/modules/todos/todo.platform.actions.ts";',
       'import { captureTodoCompletedDlq, notifyTodoCompleted } from "./src/modules/todos/todo.workers.ts";',
       'import { seedDemoWorkspace } from "./src/modules/todos/todo.seed.actions.ts";',
-      'register({',
-      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-      '}, [',
-      '  action("listProjects", listProjects),',
-      '  action("createProject", createProject),',
-      '  action("listTodos", listTodos),',
-      '  action("createTodo", createTodo),',
-      '  action("assignTodo", assignTodo),',
-      '  action("startTodo", startTodo),',
-      '  action("completeTodo", completeTodo),',
-      '  action("getTodoDashboard", getTodoDashboard),',
-      '  action("listTodoAuditLog", listTodoAuditLog),',
-      '  action("listTodoEvents", listTodoEvents),',
-      '  action("listTodoNotifications", listTodoNotifications),',
-      '  subscription("todo.created", auditTodoCreated),',
-      '  subscription("todo.assigned", auditTodoAssigned),',
-      '  subscription("todo.started", auditTodoStarted),',
-      '  subscription("todo.completed", auditTodoCompleted),',
-      '  subscription("todo.completed", enqueueTodoCompletedNotification),',
-      '  action("listWorkspacePreferences", listWorkspacePreferences),',
-      '  action("setWorkspacePreference", setWorkspacePreference),',
-      '  action("addTodoNote", addTodoNote),',
-      '  action("listTodoNotes", listTodoNotes),',
-      '  action("listTodoActivityStream", listTodoActivityStream),',
-      '  worker("todo.completed.notify", notifyTodoCompleted),',
-      '  worker("todo.completed.notify.dlq", captureTodoCompletedDlq, { dlq: false }),',
-      '  action("seedDemoWorkspace", seedDemoWorkspace),',
-      ']);',
+      '',
+      'export default {',
+      '  httpHandler: todoApiApp,',
+      '  migrations,',
+      '  project: { name: "todo-ts-postgres-test" },',
+      '  registrations: [',
+      '    action("listProjects", listProjects),',
+      '    action("createProject", createProject),',
+      '    action("listTodos", listTodos),',
+      '    action("createTodo", createTodo),',
+      '    action("assignTodo", assignTodo),',
+      '    action("startTodo", startTodo),',
+      '    action("completeTodo", completeTodo),',
+      '    action("getTodoDashboard", getTodoDashboard),',
+      '    action("listTodoAuditLog", listTodoAuditLog),',
+      '    action("listTodoEvents", listTodoEvents),',
+      '    action("listTodoNotifications", listTodoNotifications),',
+      '    subscription("todo.created", auditTodoCreated),',
+      '    subscription("todo.assigned", auditTodoAssigned),',
+      '    subscription("todo.started", auditTodoStarted),',
+      '    subscription("todo.completed", auditTodoCompleted),',
+      '    subscription("todo.completed", enqueueTodoCompletedNotification),',
+      '    action("listWorkspacePreferences", listWorkspacePreferences),',
+      '    action("setWorkspacePreference", setWorkspacePreference),',
+      '    action("addTodoNote", addTodoNote),',
+      '    action("listTodoNotes", listTodoNotes),',
+      '    action("listTodoActivityStream", listTodoActivityStream),',
+      '    worker("todo.completed.notify", notifyTodoCompleted),',
+      '    worker("todo.completed.notify.dlq", captureTodoCompletedDlq, { dlq: false }),',
+      '    action("seedDemoWorkspace", seedDemoWorkspace),',
+      '  ],',
+      '};',
     ].join("\n"),
   );
   await writeFile(resolve(dir, "tsconfig.json"), await Bun.file(resolve(exampleDir, "tsconfig.json")).text());
@@ -534,21 +545,6 @@ async function createRuntimeFixture(label: string, databaseUrl: string): Promise
       null,
       2,
     ),
-  );
-  await writeFile(
-    resolve(dir, "chimpbase.toml"),
-    [
-      "[project]",
-      'name = "todo-ts-postgres-test"',
-      "",
-      "[storage]",
-      'engine = "postgres"',
-      `url = "${databaseUrl}"`,
-      "",
-      "[server]",
-      "port = 39001",
-      "",
-    ].join("\n"),
   );
   await writeFile(resolve(dir, ".env"), "TODO_NOTIFIER_SENDER=alerts@postgres.test\n");
 
@@ -595,29 +591,17 @@ async function createKyselyFixture(label: string, databaseUrl: string): Promise<
           strict: true,
           target: "ES2022",
         },
-        include: ["index.ts"],
+        include: ["**/*.ts"],
       },
       null,
       2,
     ),
   );
-  await mkdir(resolve(dir, "migrations/postgres"), { recursive: true });
   await writeFile(
-    resolve(dir, "migrations/postgres/001_init.sql"),
-    [
-      "CREATE TABLE accounts (",
-      "  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,",
-      "  email TEXT NOT NULL UNIQUE,",
-      "  name TEXT NOT NULL,",
-      "  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-      ");",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(dir, "index.ts"),
+    resolve(dir, "chimpbase.app.ts"),
     [
       'import type { Generated } from "kysely";',
-      'import { action, register } from "@chimpbase/runtime";',
+      'import { action } from "@chimpbase/runtime";',
       "",
       "interface AccountTable {",
       "  id: Generated<number>;",
@@ -630,42 +614,32 @@ async function createKyselyFixture(label: string, databaseUrl: string): Promise<
       "  accounts: AccountTable;",
       "}",
       "",
-      "register({",
-      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-      "}, [",
-      '  action("createAccount", async (ctx, email, name) => {',
-      "    const db = ctx.db<Database>();",
-      '    await db.insertInto("accounts").values({ email, name }).execute();',
-      '    const [row] = await ctx.query<{ email: string; name: string }>(',
-      '      "SELECT email, name FROM accounts WHERE email = ?1",',
-      "      [email],",
-      "    );",
-      "    return row;",
-      "  }),",
-      '  action("listAccounts", async (ctx) => {',
-      "    const db = ctx.db<Database>();",
-      '    return await db.selectFrom("accounts").select(["id", "email", "name"]).orderBy("id", "asc").execute();',
-      "  }),",
-      '  action("createAndFailAccount", async (ctx, email, name) => {',
-      "    const db = ctx.db<Database>();",
-      '    await db.insertInto("accounts").values({ email, name }).execute();',
-      '    throw new Error("boom");',
-      "  }),",
-      "]);",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(dir, "chimpbase.toml"),
-    [
-      "[project]",
-      'name = "postgres-kysely-test"',
-      "",
-      "[storage]",
-      'engine = "postgres"',
-      `url = "${databaseUrl}"`,
-      "",
+      "export default {",
+      "  migrations: {",
+      '    postgres: [{ name: "001_init", sql: "CREATE TABLE accounts (id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());" }],',
+      "  },",
+      '  project: { name: "postgres-kysely-test" },',
+      "  registrations: [",
+      '    action("createAccount", async (ctx, email, name) => {',
+      "      const db = ctx.db<Database>();",
+      '      await db.insertInto("accounts").values({ email, name }).execute();',
+      '      const [row] = await ctx.query<{ email: string; name: string }>(',
+      '        "SELECT email, name FROM accounts WHERE email = ?1",',
+      "        [email],",
+      "      );",
+      "      return row;",
+      "    }),",
+      '    action("listAccounts", async (ctx) => {',
+      "      const db = ctx.db<Database>();",
+      '      return await db.selectFrom("accounts").select(["id", "email", "name"]).orderBy("id", "asc").execute();',
+      "    }),",
+      '    action("createAndFailAccount", async (ctx, email, name) => {',
+      "      const db = ctx.db<Database>();",
+      '      await db.insertInto("accounts").values({ email, name }).execute();',
+      '      throw new Error("boom");',
+      "    }),",
+      "  ],",
+      "};",
     ].join("\n"),
   );
 
@@ -710,67 +684,43 @@ async function createCronFixture(label: string, databaseUrl: string): Promise<st
           strict: true,
           target: "ES2022",
         },
-        include: ["index.ts"],
+        include: ["**/*.ts"],
       },
       null,
       2,
     ),
   );
-  await mkdir(resolve(dir, "migrations/postgres"), { recursive: true });
   await writeFile(
-    resolve(dir, "migrations/postgres/001_init.sql"),
+    resolve(dir, "chimpbase.app.ts"),
     [
-      "CREATE TABLE cron_audit (",
-      "  id BIGSERIAL PRIMARY KEY,",
-      "  schedule_name TEXT NOT NULL,",
-      "  fire_at_ms BIGINT NOT NULL",
-      ");",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(dir, "index.ts"),
-    [
-      'import { action, cron, register } from "@chimpbase/runtime";',
+      'import { action, cron } from "@chimpbase/runtime";',
       "",
-      "register({",
-      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-      '  registerCron(name, schedule, handler) { return globalThis.defineCron(name, schedule, handler); },',
-      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-      "}, [",
-      '  cron("billing.rollup", "*/5 * * * *", async (ctx, invocation) => {',
-      '    const shouldFail = await ctx.kv.get("cron:billing.rollup:fail");',
-      '    if (shouldFail) {',
-      '      throw new Error("boom");',
-      "    }",
-      '    await ctx.query("INSERT INTO cron_audit (schedule_name, fire_at_ms) VALUES (?1, ?2)", [invocation.name, invocation.fireAtMs]);',
-      "  }),",
-      '  action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms::double precision AS fire_at_ms FROM cron_audit ORDER BY fire_at_ms ASC")),',
-      '  action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms::double precision AS next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
-      '  action("setCronFailure", async (ctx, enabled) => {',
-      "    if (enabled) {",
-      '      await ctx.kv.set("cron:billing.rollup:fail", true);',
-      "    } else {",
-      '      await ctx.kv.delete("cron:billing.rollup:fail");',
-      "    }",
-      "    return { enabled };",
-      "  }),",
-      "]);",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(dir, "chimpbase.toml"),
-    [
-      "[project]",
-      'name = "postgres-cron-test"',
-      "",
-      "[storage]",
-      'engine = "postgres"',
-      `url = "${databaseUrl}"`,
-      "",
-      "[worker]",
-      "retry_delay_ms = 0",
-      "",
+      "export default {",
+      "  migrations: {",
+      '    postgres: [{ name: "001_init", sql: "CREATE TABLE cron_audit (id BIGSERIAL PRIMARY KEY, schedule_name TEXT NOT NULL, fire_at_ms BIGINT NOT NULL);" }],',
+      "  },",
+      '  project: { name: "postgres-cron-test" },',
+      '  worker: { retryDelayMs: 0 },',
+      "  registrations: [",
+      '    cron("billing.rollup", "*/5 * * * *", async (ctx, invocation) => {',
+      '      const shouldFail = await ctx.kv.get("cron:billing.rollup:fail");',
+      '      if (shouldFail) {',
+      '        throw new Error("boom");',
+      "      }",
+      '      await ctx.query("INSERT INTO cron_audit (schedule_name, fire_at_ms) VALUES (?1, ?2)", [invocation.name, invocation.fireAtMs]);',
+      "    }),",
+      '    action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms::double precision AS fire_at_ms FROM cron_audit ORDER BY fire_at_ms ASC")),',
+      '    action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms::double precision AS next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
+      '    action("setCronFailure", async (ctx, enabled) => {',
+      "      if (enabled) {",
+      '        await ctx.kv.set("cron:billing.rollup:fail", true);',
+      "      } else {",
+      '        await ctx.kv.delete("cron:billing.rollup:fail");',
+      "      }",
+      "      return { enabled };",
+      "    }),",
+      "  ],",
+      "};",
     ].join("\n"),
   );
 
@@ -815,16 +765,16 @@ async function createWorkflowFixture(label: string, databaseUrl: string): Promis
           strict: true,
           target: "ES2022",
         },
-        include: ["index.ts"],
+        include: ["**/*.ts"],
       },
       null,
       2,
     ),
   );
   await writeFile(
-    resolve(dir, "index.ts"),
+    resolve(dir, "chimpbase.app.ts"),
     [
-      'import { action, register, workflow, workflowActionStep, workflowSleepStep, workflowWaitForSignalStep } from "@chimpbase/runtime";',
+      'import { action, workflow, workflowActionStep, workflowSleepStep, workflowWaitForSignalStep } from "@chimpbase/runtime";',
       "",
       "const onboardingWorkflow = workflow({",
       '  name: "customer.onboarding",',
@@ -855,42 +805,28 @@ async function createWorkflowFixture(label: string, databaseUrl: string): Promis
       "  ],",
       "});",
       "",
-      "register({",
-      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-      '  registerWorkflow(definition) { return globalThis.defineWorkflow(definition); },',
-      "}, [",
-      "  onboardingWorkflow,",
-      '  action("provisionCustomer", async (ctx, customerId) => {',
-      '    await ctx.collection.insert("workflow_audit", { customerId, step: "provision" });',
-      '    return { status: "ok" };',
-      "  }),",
-      '  action("activateCustomer", async (ctx, customerId) => {',
-      '    await ctx.collection.insert("workflow_audit", { customerId, step: "activate" });',
-      '    return { status: "ok" };',
-      "  }),",
-      '  action("startOnboarding", async (ctx, customerId) => {',
-      '    return await ctx.workflow.start("customer.onboarding", { customerId }, { workflowId: `workflow:${customerId}` });',
-      "  }),",
-      '  action("signalKickoffCompleted", async (ctx, customerId, completedAt) => {',
-      '    await ctx.workflow.signal(`workflow:${customerId}`, "kickoff.completed", { completedAt });',
-      "    return { ok: true };",
-      "  }),",
-      '  action("getOnboarding", async (ctx, customerId) => await ctx.workflow.get(`workflow:${customerId}`)),',
-      "]);",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(dir, "chimpbase.toml"),
-    [
-      "[project]",
-      'name = "workflow-postgres-test"',
-      "",
-      "[storage]",
-      'engine = "postgres"',
-      `url = "${databaseUrl}"`,
-      "",
+      "export default {",
+      '  project: { name: "workflow-postgres-test" },',
+      "  registrations: [",
+      "    onboardingWorkflow,",
+      '    action("provisionCustomer", async (ctx, customerId) => {',
+      '      await ctx.collection.insert("workflow_audit", { customerId, step: "provision" });',
+      '      return { status: "ok" };',
+      "    }),",
+      '    action("activateCustomer", async (ctx, customerId) => {',
+      '      await ctx.collection.insert("workflow_audit", { customerId, step: "activate" });',
+      '      return { status: "ok" };',
+      "    }),",
+      '    action("startOnboarding", async (ctx, customerId) => {',
+      '      return await ctx.workflow.start("customer.onboarding", { customerId }, { workflowId: `workflow:${customerId}` });',
+      "    }),",
+      '    action("signalKickoffCompleted", async (ctx, customerId, completedAt) => {',
+      '      await ctx.workflow.signal(`workflow:${customerId}`, "kickoff.completed", { completedAt });',
+      "      return { ok: true };",
+      "    }),",
+      '    action("getOnboarding", async (ctx, customerId) => await ctx.workflow.get(`workflow:${customerId}`)),',
+      "  ],",
+      "};",
     ].join("\n"),
   );
 
@@ -936,16 +872,16 @@ async function createImperativeWorkflowFixture(label: string, databaseUrl: strin
           strict: true,
           target: "ES2022",
         },
-        include: ["index.ts"],
+        include: ["**/*.ts"],
       },
       null,
       2,
     ),
   );
   await writeFile(
-    resolve(dir, "index.ts"),
+    resolve(dir, "chimpbase.app.ts"),
     [
-      'import { action, register, workflow } from "@chimpbase/runtime";',
+      'import { action, workflow } from "@chimpbase/runtime";',
       "",
       "const onboardingWorkflow = workflow({",
       '  name: "customer.onboarding.machine",',
@@ -989,42 +925,28 @@ async function createImperativeWorkflowFixture(label: string, databaseUrl: strin
       "  },",
       "});",
       "",
-      "register({",
-      '  registerAction(name, handler) { return globalThis.defineAction(name, handler); },',
-      '  registerSubscription(name, handler) { return globalThis.defineSubscription(name, handler); },',
-      '  registerWorker(name, handler, definition) { return globalThis.defineWorker(name, handler, definition); },',
-      '  registerWorkflow(definition) { return globalThis.defineWorkflow(definition); },',
-      "}, [",
-      "  onboardingWorkflow,",
-      '  action("provisionCustomer", async (ctx, customerId) => {',
-      '    await ctx.collection.insert("workflow_machine_audit", { customerId, step: "provision" });',
-      '    return { status: "ok" };',
-      "  }),",
-      '  action("activateCustomer", async (ctx, customerId) => {',
-      '    await ctx.collection.insert("workflow_machine_audit", { customerId, step: "activate" });',
-      '    return { status: "ok" };',
-      "  }),",
-      '  action("startOnboardingMachine", async (ctx, customerId) => {',
-      '    return await ctx.workflow.start("customer.onboarding.machine", { customerId }, { workflowId: `workflow-machine:${customerId}` });',
-      "  }),",
-      '  action("signalMachineKickoffCompleted", async (ctx, customerId, completedAt) => {',
-      '    await ctx.workflow.signal(`workflow-machine:${customerId}`, "kickoff.completed", { completedAt });',
-      "    return { ok: true };",
-      "  }),",
-      '  action("getOnboardingMachine", async (ctx, customerId) => await ctx.workflow.get(`workflow-machine:${customerId}`)),',
-      "]);",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(dir, "chimpbase.toml"),
-    [
-      "[project]",
-      'name = "workflow-machine-postgres-test"',
-      "",
-      "[storage]",
-      'engine = "postgres"',
-      `url = "${databaseUrl}"`,
-      "",
+      "export default {",
+      '  project: { name: "workflow-machine-postgres-test" },',
+      "  registrations: [",
+      "    onboardingWorkflow,",
+      '    action("provisionCustomer", async (ctx, customerId) => {',
+      '      await ctx.collection.insert("workflow_machine_audit", { customerId, step: "provision" });',
+      '      return { status: "ok" };',
+      "    }),",
+      '    action("activateCustomer", async (ctx, customerId) => {',
+      '      await ctx.collection.insert("workflow_machine_audit", { customerId, step: "activate" });',
+      '      return { status: "ok" };',
+      "    }),",
+      '    action("startOnboardingMachine", async (ctx, customerId) => {',
+      '      return await ctx.workflow.start("customer.onboarding.machine", { customerId }, { workflowId: `workflow-machine:${customerId}` });',
+      "    }),",
+      '    action("signalMachineKickoffCompleted", async (ctx, customerId, completedAt) => {',
+      '      await ctx.workflow.signal(`workflow-machine:${customerId}`, "kickoff.completed", { completedAt });',
+      "      return { ok: true };",
+      "    }),",
+      '    action("getOnboardingMachine", async (ctx, customerId) => await ctx.workflow.get(`workflow-machine:${customerId}`)),',
+      "  ],",
+      "};",
     ].join("\n"),
   );
 

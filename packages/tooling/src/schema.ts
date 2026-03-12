@@ -5,7 +5,6 @@ import { PostgresDialect, Kysely, type ColumnMetadata, type TableMetadata } from
 import { Pool } from "pg";
 
 import { loadProjectAppDefinition } from "./app.ts";
-import { loadProjectConfig } from "./config.ts";
 import { loadProjectPostgresMigrations } from "./migrations.ts";
 import { canUseDocker, startPostgresDocker } from "./postgres_docker.ts";
 
@@ -198,12 +197,11 @@ async function prepareSchemaDatabase<TResult>(
 
 async function resolveProjectName(projectDir: string): Promise<string> {
   const app = await loadProjectAppDefinition(projectDir);
-  if (app) {
-    return app.project.name;
+  if (!app) {
+    throw new Error(`missing chimpbase.app.ts in ${projectDir}`);
   }
 
-  const config = await loadProjectConfig(projectDir);
-  return config.project.name;
+  return app.project.name;
 }
 
 async function readEnums(pool: Pool): Promise<SchemaEnumSnapshot[]> {

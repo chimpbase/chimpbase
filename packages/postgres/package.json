@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/postgres",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Reusable Postgres storage adapter for Chimpbase hosts.",
   "license": "Apache-2.0",
   "type": "module",
