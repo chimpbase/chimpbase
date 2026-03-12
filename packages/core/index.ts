@@ -4,6 +4,7 @@ import type {
   ChimpbaseRegistration,
   ChimpbaseRouteHandler,
   ChimpbaseSubscriptionHandler,
+  ChimpbaseSubscriptionOptions,
   ChimpbaseWorkerDefinition,
   ChimpbaseWorkerHandler,
   ChimpbaseWorkflowDefinition,
@@ -170,7 +171,7 @@ export interface ChimpbaseEntrypointTarget {
   registerSubscription<TPayload = unknown, TResult = unknown>(
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
-    options?: { idempotent?: boolean; name?: string },
+    options?: ChimpbaseSubscriptionOptions,
   ): ChimpbaseSubscriptionHandler<TPayload, TResult>;
   registerWorker<TPayload = unknown, TResult = unknown>(
     name: string,

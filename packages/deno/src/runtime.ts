@@ -41,6 +41,7 @@ import {
   type ChimpbaseRouteEnv,
   type ChimpbaseRouteHandler,
   type ChimpbaseSubscriptionHandler,
+  type ChimpbaseSubscriptionOptions,
   type ChimpbaseWorkerDefinition,
   type ChimpbaseWorkerHandler,
   type ChimpbaseWorkflowContract,
@@ -227,12 +228,9 @@ export class ChimpbaseDenoHost implements ChimpbaseEntrypointTarget {
   registerSubscription<TPayload = unknown, TResult = unknown>(
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
-    options?: { idempotent?: boolean; name?: string },
+    options?: ChimpbaseSubscriptionOptions,
   ): ChimpbaseSubscriptionHandler<TPayload, TResult> {
     const idempotent = options?.idempotent ?? false;
-    if (idempotent && !options?.name) {
-      throw new Error("idempotent subscriptions require a name");
-    }
     const subscriptions = this.registry.subscriptions.get(eventName) ?? [];
     subscriptions.push({
       handler: handler as ChimpbaseSubscriptionHandler,
