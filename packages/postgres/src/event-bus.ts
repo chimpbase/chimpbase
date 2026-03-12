@@ -78,6 +78,7 @@ export class PostgresPollingEventBus implements ChimpbaseEventBus {
       if (result.rows.length === 0) return;
 
       const events: ChimpbaseEventRecord[] = result.rows.map((row) => ({
+        id: row.id,
         name: row.event_name,
         payload: JSON.parse(row.payload_json),
         payloadJson: row.payload_json,

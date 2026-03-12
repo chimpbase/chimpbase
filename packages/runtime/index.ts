@@ -503,6 +503,7 @@ export interface ChimpbaseRegistrationTarget {
   registerSubscription<TPayload = unknown, TResult = unknown>(
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+    options?: { idempotent?: boolean; name?: string },
   ): ChimpbaseSubscriptionHandler<TPayload, TResult>;
   registerWorker<TPayload = unknown, TResult = unknown>(
     name: string,
@@ -537,7 +538,9 @@ export interface ChimpbaseActionRegistration<
 export interface ChimpbaseSubscriptionRegistration<TPayload = unknown, TResult = unknown> {
   eventName: string;
   handler: ChimpbaseSubscriptionHandler<TPayload, TResult>;
+  idempotent?: boolean;
   kind: "subscription";
+  name?: string;
   telemetry?: ChimpbaseTelemetryPersistOption;
 }
 
@@ -648,12 +651,14 @@ export function action<TArgs extends unknown[] = unknown[], TResult = unknown>(
 export function subscription<TPayload = unknown, TResult = unknown>(
   eventName: string,
   handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
-  options?: { telemetry?: ChimpbaseTelemetryPersistOption },
+  options?: { idempotent?: boolean; name?: string; telemetry?: ChimpbaseTelemetryPersistOption },
 ): ChimpbaseSubscriptionRegistration<TPayload, TResult> {
   return {
     eventName,
     handler,
+    idempotent: options?.idempotent,
     kind: "subscription",
+    name: options?.name,
     telemetry: options?.telemetry,
   };
 }
@@ -884,7 +889,10 @@ export function register(
         }
         break;
       case "subscription":
-        target.registerSubscription(entry.eventName, entry.handler);
+        target.registerSubscription(entry.eventName, entry.handler, {
+          idempotent: entry.idempotent,
+          name: entry.name,
+        });
         if (entry.telemetry !== undefined) {
           target.setTelemetryOverride?.(`subscription:${entry.eventName}`, entry.telemetry);
         }

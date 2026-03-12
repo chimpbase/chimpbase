@@ -45,6 +45,7 @@ export interface ChimpbaseExecutionScope {
 }
 
 export interface ChimpbaseEventRecord {
+  id?: number;
   name: string;
   payload: unknown;
   payloadJson: string;
@@ -1679,9 +1680,16 @@ export class ChimpbaseEngine {
   private async dispatchSubscriptions(events: ChimpbaseEventRecord[]): Promise<void> {
     for (const event of events) {
       const subscriptions = this.registry.subscriptions.get(event.name) ?? [];
-      for (const subscription of subscriptions) {
+      for (const sub of subscriptions) {
         await this.runInTransaction(async () => {
-          await subscription(this.createContext({ kind: "subscription", name: event.name }), event.payload);
+          if (sub.idempotent && event.id !== undefined) {
+            const key = `_chimpbase.sub.seen:${event.id}:${sub.name}`;
+            if (await this.adapter.kvGet<boolean>(key)) return;
+            await sub.handler(this.createContext({ kind: "subscription", name: event.name }), event.payload);
+            await this.adapter.kvSet(key, true);
+          } else {
+            await sub.handler(this.createContext({ kind: "subscription", name: event.name }), event.payload);
+          }
         });
       }
     }

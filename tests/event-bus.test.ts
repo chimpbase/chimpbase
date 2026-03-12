@@ -103,8 +103,12 @@ describe("event bus", () => {
     const { engine, registry } = await createTestEngine(bus);
 
     registry.subscriptions.set("order.created", [
-      async (_ctx, payload) => {
-        dispatched.push((payload as { orderId: string }).orderId);
+      {
+        handler: async (_ctx, payload) => {
+          dispatched.push((payload as { orderId: string }).orderId);
+        },
+        idempotent: false,
+        name: "",
       },
     ]);
 
@@ -148,8 +152,12 @@ describe("event bus", () => {
     const { engine, registry } = await createTestEngine(bus);
 
     registry.subscriptions.set("ping", [
-      async (_ctx, payload) => {
-        dispatched.push((payload as { msg: string }).msg);
+      {
+        handler: async (_ctx, payload) => {
+          dispatched.push((payload as { msg: string }).msg);
+        },
+        idempotent: false,
+        name: "",
       },
     ]);
 
@@ -190,10 +198,18 @@ describe("event bus", () => {
     const { engine, registry } = await createTestEngine(bus);
 
     registry.subscriptions.set("order.created", [
-      async (_ctx, payload) => { orderEvents.push(payload); },
+      {
+        handler: async (_ctx, payload) => { orderEvents.push(payload); },
+        idempotent: false,
+        name: "",
+      },
     ]);
     registry.subscriptions.set("user.registered", [
-      async (_ctx, payload) => { userEvents.push(payload); },
+      {
+        handler: async (_ctx, payload) => { userEvents.push(payload); },
+        idempotent: false,
+        name: "",
+      },
     ]);
 
     engine.startEventBus();
@@ -207,6 +223,191 @@ describe("event bus", () => {
 
     expect(orderEvents).toEqual([{ id: 1 }, { id: 2 }]);
     expect(userEvents).toEqual([{ name: "alice" }]);
+
+    engine.stopEventBus();
+  });
+
+  test("idempotent handler skips duplicate event with same id", async () => {
+    class TestEventBus implements ChimpbaseEventBus {
+      private callback: ChimpbaseEventBusCallback | null = null;
+
+      async publish(_events: ChimpbaseEventRecord[]): Promise<void> {}
+
+      start(callback: ChimpbaseEventBusCallback): void {
+        this.callback = callback;
+      }
+
+      stop(): void {
+        this.callback = null;
+      }
+
+      async simulateExternalEvents(events: ChimpbaseEventRecord[]): Promise<void> {
+        if (!this.callback) throw new Error("not started");
+        await this.callback(events);
+      }
+    }
+
+    const bus = new TestEventBus();
+    const calls: unknown[] = [];
+    const { engine, registry } = await createTestEngine(bus);
+
+    registry.subscriptions.set("order.created", [
+      {
+        handler: async (_ctx, payload) => { calls.push(payload); },
+        idempotent: true,
+        name: "onOrderCreated",
+      },
+    ]);
+
+    engine.startEventBus();
+
+    await bus.simulateExternalEvents([
+      { id: 42, name: "order.created", payload: { orderId: "a" }, payloadJson: '{"orderId":"a"}' },
+    ]);
+    await bus.simulateExternalEvents([
+      { id: 42, name: "order.created", payload: { orderId: "a" }, payloadJson: '{"orderId":"a"}' },
+    ]);
+
+    expect(calls).toEqual([{ orderId: "a" }]);
+
+    engine.stopEventBus();
+  });
+
+  test("idempotent handler processes event when id differs", async () => {
+    class TestEventBus implements ChimpbaseEventBus {
+      private callback: ChimpbaseEventBusCallback | null = null;
+
+      async publish(_events: ChimpbaseEventRecord[]): Promise<void> {}
+
+      start(callback: ChimpbaseEventBusCallback): void {
+        this.callback = callback;
+      }
+
+      stop(): void {
+        this.callback = null;
+      }
+
+      async simulateExternalEvents(events: ChimpbaseEventRecord[]): Promise<void> {
+        if (!this.callback) throw new Error("not started");
+        await this.callback(events);
+      }
+    }
+
+    const bus = new TestEventBus();
+    const calls: unknown[] = [];
+    const { engine, registry } = await createTestEngine(bus);
+
+    registry.subscriptions.set("order.created", [
+      {
+        handler: async (_ctx, payload) => { calls.push(payload); },
+        idempotent: true,
+        name: "onOrderCreated",
+      },
+    ]);
+
+    engine.startEventBus();
+
+    await bus.simulateExternalEvents([
+      { id: 1, name: "order.created", payload: { orderId: "a" }, payloadJson: '{"orderId":"a"}' },
+    ]);
+    await bus.simulateExternalEvents([
+      { id: 2, name: "order.created", payload: { orderId: "b" }, payloadJson: '{"orderId":"b"}' },
+    ]);
+
+    expect(calls).toEqual([{ orderId: "a" }, { orderId: "b" }]);
+
+    engine.stopEventBus();
+  });
+
+  test("non-idempotent handler processes duplicate events", async () => {
+    class TestEventBus implements ChimpbaseEventBus {
+      private callback: ChimpbaseEventBusCallback | null = null;
+
+      async publish(_events: ChimpbaseEventRecord[]): Promise<void> {}
+
+      start(callback: ChimpbaseEventBusCallback): void {
+        this.callback = callback;
+      }
+
+      stop(): void {
+        this.callback = null;
+      }
+
+      async simulateExternalEvents(events: ChimpbaseEventRecord[]): Promise<void> {
+        if (!this.callback) throw new Error("not started");
+        await this.callback(events);
+      }
+    }
+
+    const bus = new TestEventBus();
+    const calls: unknown[] = [];
+    const { engine, registry } = await createTestEngine(bus);
+
+    registry.subscriptions.set("order.created", [
+      {
+        handler: async (_ctx, payload) => { calls.push(payload); },
+        idempotent: false,
+        name: "",
+      },
+    ]);
+
+    engine.startEventBus();
+
+    await bus.simulateExternalEvents([
+      { id: 42, name: "order.created", payload: { orderId: "a" }, payloadJson: '{"orderId":"a"}' },
+    ]);
+    await bus.simulateExternalEvents([
+      { id: 42, name: "order.created", payload: { orderId: "a" }, payloadJson: '{"orderId":"a"}' },
+    ]);
+
+    expect(calls).toEqual([{ orderId: "a" }, { orderId: "a" }]);
+
+    engine.stopEventBus();
+  });
+
+  test("event without id bypasses idempotency check", async () => {
+    class TestEventBus implements ChimpbaseEventBus {
+      private callback: ChimpbaseEventBusCallback | null = null;
+
+      async publish(_events: ChimpbaseEventRecord[]): Promise<void> {}
+
+      start(callback: ChimpbaseEventBusCallback): void {
+        this.callback = callback;
+      }
+
+      stop(): void {
+        this.callback = null;
+      }
+
+      async simulateExternalEvents(events: ChimpbaseEventRecord[]): Promise<void> {
+        if (!this.callback) throw new Error("not started");
+        await this.callback(events);
+      }
+    }
+
+    const bus = new TestEventBus();
+    const calls: unknown[] = [];
+    const { engine, registry } = await createTestEngine(bus);
+
+    registry.subscriptions.set("order.created", [
+      {
+        handler: async (_ctx, payload) => { calls.push(payload); },
+        idempotent: true,
+        name: "onOrderCreated",
+      },
+    ]);
+
+    engine.startEventBus();
+
+    await bus.simulateExternalEvents([
+      { name: "order.created", payload: { orderId: "a" }, payloadJson: '{"orderId":"a"}' },
+    ]);
+    await bus.simulateExternalEvents([
+      { name: "order.created", payload: { orderId: "a" }, payloadJson: '{"orderId":"a"}' },
+    ]);
+
+    // Without id, idempotency is skipped — handler runs both times
+    expect(calls).toEqual([{ orderId: "a" }, { orderId: "a" }]);
 
     engine.stopEventBus();
   });

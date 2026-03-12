@@ -76,7 +76,7 @@ const app = defineChimpbaseApp({
     }),
     subscription("customer.created", async (ctx, event) => {
       await ctx.queue.enqueue("customer.sync", event);
-    }),
+    }, { idempotent: true, name: "enqueueCustomerSync" }),
     worker("customer.sync", async (ctx, event) => {
       const apiKey = ctx.secret("CRM_API_KEY");
 
@@ -189,6 +189,19 @@ If your domain wants a table, join, transaction or `RETURNING`, just write it.
 Use ephemeral pub/sub for internal choreography without turning your codebase into a message-broker thesis.
 
 Publish from an action, react in subscriptions, keep the flow explicit.
+
+#### Idempotent subscriptions
+
+Cross-process event delivery can cause duplicate dispatches (e.g., on container restart before the high-water mark advances). Mark a subscription as idempotent to skip events it has already processed:
+
+```ts
+subscription("order.created", handleOrderCreated, {
+  idempotent: true,
+  name: "handleOrderCreated",
+});
+```
+
+When `idempotent: true`, the check and handler execution happen atomically inside the same DB transaction. A stable `name` is required so the deduplication marker is deterministic. Events without an `id` (local-only events) bypass the check automatically.
 
 ### `queue.enqueue` + `worker`
 

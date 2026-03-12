@@ -146,11 +146,17 @@ export interface ChimpbaseCronRegistration {
   schedule: string;
 }
 
+export interface ChimpbaseSubscriptionEntry {
+  handler: ChimpbaseSubscriptionHandler;
+  idempotent: boolean;
+  name: string;
+}
+
 export interface ChimpbaseRegistry {
   actions: Map<string, ChimpbaseActionHandler>;
   crons: Map<string, ChimpbaseCronRegistration>;
   httpHandler: ChimpbaseRouteHandler | null;
-  subscriptions: Map<string, ChimpbaseSubscriptionHandler[]>;
+  subscriptions: Map<string, ChimpbaseSubscriptionEntry[]>;
   telemetryOverrides: Map<string, ChimpbaseTelemetryPersistOverride>;
   workers: Map<string, ChimpbaseWorkerRegistration>;
   workflows: Map<string, Map<number, ChimpbaseWorkflowDefinition>>;
@@ -164,6 +170,7 @@ export interface ChimpbaseEntrypointTarget {
   registerSubscription<TPayload = unknown, TResult = unknown>(
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
+    options?: { idempotent?: boolean; name?: string },
   ): ChimpbaseSubscriptionHandler<TPayload, TResult>;
   registerWorker<TPayload = unknown, TResult = unknown>(
     name: string,
