@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/deno",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Deno CLI and self-hosted host for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",

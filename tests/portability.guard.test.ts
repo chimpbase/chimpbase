@@ -31,7 +31,7 @@ describe("portable package guards", () => {
       const violations: string[] = [];
 
       for (const file of files) {
-        const source = await readFile(file, "utf8");
+        const source = stripComments(await readFile(file, "utf8"));
 
         for (const check of bannedChecks) {
           if (check.pattern.test(source)) {
@@ -50,7 +50,7 @@ describe("portable package guards", () => {
     const violations: string[] = [];
 
     for (const file of files) {
-      const source = await readFile(file, "utf8");
+      const source = stripComments(await readFile(file, "utf8"));
       if (/\bBun\b/.test(source)) {
         violations.push(`${relative(repoRoot, file)}: found Bun global`);
       }
@@ -59,6 +59,12 @@ describe("portable package guards", () => {
     expect(violations).toEqual([]);
   });
 });
+
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*/g, "");
+}
 
 async function listTypescriptFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });

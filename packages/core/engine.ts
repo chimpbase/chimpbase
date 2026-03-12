@@ -29,6 +29,7 @@ import type {
 } from "@chimpbase/runtime";
 
 import { computeNextCronFireTime } from "./cron.ts";
+import { NoopEventBus, type ChimpbaseEventBus } from "./event-bus.ts";
 import {
   createDefaultChimpbasePlatformShim,
   type ChimpbaseDrainOptions,
@@ -230,6 +231,7 @@ export interface ChimpbaseEngineAdapter {
 
 export interface ChimpbaseEngineOptions {
   adapter: ChimpbaseEngineAdapter;
+  eventBus?: ChimpbaseEventBus;
   platform?: ChimpbasePlatformShim;
   registry: ChimpbaseRegistry;
   secrets: ChimpbaseSecretsSource;
@@ -247,6 +249,7 @@ export interface ChimpbaseEngineOptions {
 export class ChimpbaseEngine {
   private readonly adapter: ChimpbaseEngineAdapter;
   private readonly committedEvents: ChimpbaseEventRecord[] = [];
+  private readonly eventBus: ChimpbaseEventBus;
   private readonly pendingEvents: ChimpbaseEventRecord[] = [];
   private readonly platform: ChimpbasePlatformShim;
   private readonly registry: ChimpbaseRegistry;
@@ -258,6 +261,7 @@ export class ChimpbaseEngine {
 
   constructor(options: ChimpbaseEngineOptions) {
     this.adapter = options.adapter;
+    this.eventBus = options.eventBus ?? new NoopEventBus();
     this.platform = options.platform ?? createDefaultChimpbasePlatformShim();
     this.registry = options.registry;
     this.secrets = options.secrets;
@@ -289,6 +293,17 @@ export class ChimpbaseEngine {
       },
       name: INTERNAL_WORKFLOW_QUEUE_NAME,
     });
+  }
+
+  startEventBus(): void {
+    this.eventBus.start(async (events, ack) => {
+      await this.dispatchSubscriptions(events);
+      await ack?.();
+    });
+  }
+
+  stopEventBus(): void {
+    this.eventBus.stop();
   }
 
   async executeAction(name: string, args: unknown[] = []): Promise<ChimpbaseActionExecutionResult> {
@@ -1687,7 +1702,9 @@ export class ChimpbaseEngine {
 
       if (isRootTransaction) {
         await this.adapter.commitTransaction(this.pendingEvents);
-        this.committedEvents.push(...this.pendingEvents.splice(0));
+        const justCommitted = this.pendingEvents.splice(0);
+        this.committedEvents.push(...justCommitted);
+        await this.eventBus.publish(justCommitted);
       }
 
       return result;

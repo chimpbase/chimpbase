@@ -20,6 +20,8 @@ import type {
 
 import { createPostgresKysely } from "./kysely.ts";
 
+export { PostgresPollingEventBus, type PostgresPollingEventBusOptions } from "./event-bus.ts";
+
 interface PersistedCollectionDocument {
   document_id: string;
   document_json: string;

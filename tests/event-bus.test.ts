@@ -1,0 +1,213 @@
+import { describe, expect, test } from "bun:test";
+
+import {
+  createChimpbaseRegistry,
+  createDefaultChimpbasePlatformShim,
+  NoopEventBus,
+  type ChimpbaseEventBus,
+  type ChimpbaseEventBusCallback,
+  type ChimpbaseEventRecord,
+} from "../packages/core/index.ts";
+import { ChimpbaseEngine } from "../packages/core/engine.ts";
+import { Database } from "bun:sqlite";
+import {
+  createSqliteEngineAdapter,
+  ensureSqliteInternalTables,
+} from "../packages/bun/src/sqlite_adapter.ts";
+
+async function createTestEngine(eventBus: ChimpbaseEventBus) {
+  const platform = createDefaultChimpbasePlatformShim();
+  const registry = createChimpbaseRegistry();
+  const db = new Database(":memory:");
+  await ensureSqliteInternalTables(db);
+  const adapter = createSqliteEngineAdapter(db, platform);
+
+  const engine = new ChimpbaseEngine({
+    adapter,
+    eventBus,
+    platform,
+    registry,
+    secrets: { get: () => null },
+    telemetry: { minLevel: "debug", persist: { log: false, metric: false, trace: false } },
+    worker: { leaseMs: 30_000, maxAttempts: 5, retryDelayMs: 0 },
+  });
+
+  return { db, engine, registry };
+}
+
+describe("event bus", () => {
+  test("NoopEventBus publish and start are no-ops", async () => {
+    const bus = new NoopEventBus();
+    const received: ChimpbaseEventRecord[][] = [];
+
+    await bus.publish([{ name: "test", payload: {}, payloadJson: "{}" }]);
+    bus.start(async (events) => { received.push(events); });
+    bus.stop();
+
+    expect(received).toEqual([]);
+  });
+
+  test("custom event bus receives publish calls after action commit", async () => {
+    const published: ChimpbaseEventRecord[][] = [];
+
+    class SpyEventBus implements ChimpbaseEventBus {
+      async publish(events: ChimpbaseEventRecord[]): Promise<void> {
+        published.push(events);
+      }
+      start(_callback: ChimpbaseEventBusCallback): void {}
+      stop(): void {}
+    }
+
+    const { engine, registry } = await createTestEngine(new SpyEventBus());
+
+    registry.actions.set("emitEvent", async (ctx) => {
+      ctx.pubsub.publish("order.created", { orderId: "123" });
+    });
+
+    await engine.executeAction("emitEvent");
+
+    expect(published).toHaveLength(1);
+    expect(published[0]).toHaveLength(1);
+    expect(published[0][0].name).toBe("order.created");
+    expect(published[0][0].payload).toEqual({ orderId: "123" });
+  });
+
+  test("ack callback is invoked after subscriptions are dispatched", async () => {
+    const ackCalls: number[] = [];
+    const dispatched: string[] = [];
+    let ackCallOrder = 0;
+
+    class AckEventBus implements ChimpbaseEventBus {
+      private callback: ChimpbaseEventBusCallback | null = null;
+
+      async publish(_events: ChimpbaseEventRecord[]): Promise<void> {}
+
+      start(callback: ChimpbaseEventBusCallback): void {
+        this.callback = callback;
+      }
+
+      stop(): void {
+        this.callback = null;
+      }
+
+      async simulateExternalEvents(events: ChimpbaseEventRecord[]): Promise<void> {
+        if (!this.callback) throw new Error("not started");
+        await this.callback(events, async () => {
+          ackCallOrder++;
+          ackCalls.push(ackCallOrder);
+        });
+      }
+    }
+
+    const bus = new AckEventBus();
+    const { engine, registry } = await createTestEngine(bus);
+
+    registry.subscriptions.set("order.created", [
+      async (_ctx, payload) => {
+        dispatched.push((payload as { orderId: string }).orderId);
+      },
+    ]);
+
+    engine.startEventBus();
+
+    await bus.simulateExternalEvents([
+      { name: "order.created", payload: { orderId: "abc" }, payloadJson: '{"orderId":"abc"}' },
+      { name: "order.created", payload: { orderId: "def" }, payloadJson: '{"orderId":"def"}' },
+    ]);
+
+    // Subscription handlers ran before ack
+    expect(dispatched).toEqual(["abc", "def"]);
+    // Ack was called exactly once, after dispatch
+    expect(ackCalls).toEqual([1]);
+
+    engine.stopEventBus();
+  });
+
+  test("ack is not required — absent ack does not throw", async () => {
+    class NoAckEventBus implements ChimpbaseEventBus {
+      private callback: ChimpbaseEventBusCallback | null = null;
+
+      async publish(_events: ChimpbaseEventRecord[]): Promise<void> {}
+
+      start(callback: ChimpbaseEventBusCallback): void {
+        this.callback = callback;
+      }
+
+      stop(): void {
+        this.callback = null;
+      }
+
+      async simulateExternalEvents(events: ChimpbaseEventRecord[]): Promise<void> {
+        if (!this.callback) throw new Error("not started");
+        await this.callback(events);
+      }
+    }
+
+    const bus = new NoAckEventBus();
+    const dispatched: string[] = [];
+    const { engine, registry } = await createTestEngine(bus);
+
+    registry.subscriptions.set("ping", [
+      async (_ctx, payload) => {
+        dispatched.push((payload as { msg: string }).msg);
+      },
+    ]);
+
+    engine.startEventBus();
+
+    await bus.simulateExternalEvents([
+      { name: "ping", payload: { msg: "hello" }, payloadJson: '{"msg":"hello"}' },
+    ]);
+
+    expect(dispatched).toEqual(["hello"]);
+
+    engine.stopEventBus();
+  });
+
+  test("multiple events across different topics dispatch to correct subscriptions", async () => {
+    class TestEventBus implements ChimpbaseEventBus {
+      private callback: ChimpbaseEventBusCallback | null = null;
+
+      async publish(_events: ChimpbaseEventRecord[]): Promise<void> {}
+
+      start(callback: ChimpbaseEventBusCallback): void {
+        this.callback = callback;
+      }
+
+      stop(): void {
+        this.callback = null;
+      }
+
+      async simulateExternalEvents(events: ChimpbaseEventRecord[]): Promise<void> {
+        if (!this.callback) throw new Error("not started");
+        await this.callback(events);
+      }
+    }
+
+    const bus = new TestEventBus();
+    const orderEvents: unknown[] = [];
+    const userEvents: unknown[] = [];
+    const { engine, registry } = await createTestEngine(bus);
+
+    registry.subscriptions.set("order.created", [
+      async (_ctx, payload) => { orderEvents.push(payload); },
+    ]);
+    registry.subscriptions.set("user.registered", [
+      async (_ctx, payload) => { userEvents.push(payload); },
+    ]);
+
+    engine.startEventBus();
+
+    await bus.simulateExternalEvents([
+      { name: "order.created", payload: { id: 1 }, payloadJson: '{"id":1}' },
+      { name: "user.registered", payload: { name: "alice" }, payloadJson: '{"name":"alice"}' },
+      { name: "order.created", payload: { id: 2 }, payloadJson: '{"id":2}' },
+      { name: "unknown.topic", payload: {}, payloadJson: '{}' },
+    ]);
+
+    expect(orderEvents).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(userEvents).toEqual([{ name: "alice" }]);
+
+    engine.stopEventBus();
+  });
+});

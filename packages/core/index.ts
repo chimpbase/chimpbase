@@ -226,6 +226,12 @@ export {
 } from "./engine.ts";
 
 export {
+  NoopEventBus,
+  type ChimpbaseEventBus,
+  type ChimpbaseEventBusCallback,
+} from "./event-bus.ts";
+
+export {
   createDefaultChimpbasePlatformShim,
   type ChimpbaseDrainOptions,
   type ChimpbaseDrainResult,
