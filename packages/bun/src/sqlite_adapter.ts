@@ -1,5 +1,5 @@
-import { mkdir, readdir } from "node:fs/promises";
-import { dirname, extname, resolve } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import type { CompiledQuery, Kysely, QueryResult } from "kysely";
@@ -7,6 +7,7 @@ import type { CompiledQuery, Kysely, QueryResult } from "kysely";
 import type {
   ChimpbaseEngineAdapter,
   ChimpbaseEventRecord,
+  ChimpbasePlatformShim,
   ChimpbaseProjectConfig,
   ChimpbaseQueueJobRecord,
 } from "@chimpbase/core";
@@ -46,25 +47,9 @@ export async function openSqliteDatabase(
   return new Database(databasePath);
 }
 
-export async function applySqlMigrations(db: Database, migrationsDir: string | null): Promise<void> {
-  if (!migrationsDir) {
-    return;
-  }
-
-  let entries: string[];
-  try {
-    entries = await readdir(migrationsDir);
-  } catch {
-    return;
-  }
-
-  const migrations = entries
-    .filter((entry) => extname(entry) === ".sql")
-    .sort();
-
+export async function applySqlMigrations(db: Database, migrations: readonly string[]): Promise<void> {
   for (const migration of migrations) {
-    const sql = await Bun.file(resolve(migrationsDir, migration)).text();
-    db.exec(sql);
+    db.exec(migration);
   }
 }
 
@@ -227,7 +212,10 @@ export async function ensureSqliteInternalTables(db: Database): Promise<void> {
   );
 }
 
-export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter {
+export function createSqliteEngineAdapter(
+  db: Database,
+  platform: ChimpbasePlatformShim,
+): ChimpbaseEngineAdapter {
   let kysely: Kysely<any> | null = null;
 
   return {
@@ -259,8 +247,8 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
       db.exec("BEGIN IMMEDIATE");
     },
     async claimNextCronSchedule(leaseMs: number): Promise<(PersistedCronScheduleRow & { lease_token: string }) | null> {
-      const now = Date.now();
-      const leaseToken = crypto.randomUUID();
+      const now = platform.now();
+      const leaseToken = platform.randomUUID();
       const leaseExpiresAtMs = now + leaseMs;
 
       db.exec("BEGIN IMMEDIATE");
@@ -325,7 +313,7 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
       }
     },
     async claimNextQueueJob(leaseMs: number): Promise<ChimpbaseQueueJobRecord | null> {
-      const now = Date.now();
+      const now = platform.now();
       const leaseExpiresAtMs = now + leaseMs;
 
       db.exec("BEGIN IMMEDIATE");
@@ -405,7 +393,7 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
       return row ? JSON.parse(row.document_json) as TDocument : null;
     },
     async collectionInsert<TDocument extends Record<string, unknown>>(name: string, document: TDocument): Promise<string> {
-      const documentId = crypto.randomUUID();
+      const documentId = platform.randomUUID();
       const payload = JSON.stringify({ ...document, id: documentId });
       db.query(
         `
@@ -582,7 +570,7 @@ export function createSqliteEngineAdapter(db: Database): ChimpbaseEngineAdapter 
       return runQuery<T>(db, sql, toSqlBindings(params));
     },
     async queueEnqueue<TPayload = unknown>(name: string, payload: TPayload, options?: ChimpbaseQueueEnqueueOptions) {
-      const availableAtMs = Date.now() + Math.max(0, options?.delayMs ?? 0);
+      const availableAtMs = platform.now() + Math.max(0, options?.delayMs ?? 0);
       db.query(
         `
           INSERT INTO _chimpbase_queue_jobs (

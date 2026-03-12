@@ -36,7 +36,7 @@ chimpbase.register(
 
 ## Per-handler telemetry persistence
 
-Starting in `0.1.4`, the `action()`, `worker()`, `subscription()` and `cron()` factories accept an optional `telemetry` override:
+The `action()`, `worker()`, `subscription()` and `cron()` factories accept an optional `telemetry` override:
 
 ```ts
 action("createCustomer", handler, { telemetry: { log: true, metric: true } });
@@ -45,7 +45,7 @@ worker("sync", handler, undefined, { telemetry: false });
 
 This overrides the global `telemetry.persist` setting from `createChimpbase`. See `@chimpbase/bun` docs for the full configuration shape.
 
-## 0.1.4 distribution model
+## Distribution model
 
 `@chimpbase/runtime` is published as TypeScript source for the alpha release.
 

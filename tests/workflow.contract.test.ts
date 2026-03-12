@@ -62,13 +62,46 @@ describe("workflow contracts", () => {
     expect(first.definition.version).toBe(1);
     expect(first.compatibility).toBe("additive");
     expect(first.changed).toBe(true);
-    expect(first.contract.hash).toBeString();
+    expect(first.contract.hash).toBe("f576e7d63f39541b");
 
     const second = versionWorkflow(createWorkflowDraft(), first.contract);
     expect(second.definition.version).toBe(1);
     expect(second.compatibility).toBe("identical");
     expect(second.changed).toBe(false);
     expect(second.contract.hash).toBe(first.contract.hash);
+  });
+
+  test("keeps workflow hashes stable when object keys are reordered", () => {
+    const first = versionWorkflow(createWorkflowDraft());
+    const reordered = versionWorkflow({
+      ...createWorkflowDraft(),
+      inputSchema: {
+        type: "object",
+        required: ["customerId"],
+        properties: {
+          customerId: { type: "string" },
+        },
+      },
+      signalSchemas: {
+        "kickoff.completed": {
+          type: "object",
+          required: ["completedAt"],
+          properties: {
+            completedAt: { type: "string" },
+          },
+        },
+      },
+      stateSchema: {
+        type: "object",
+        required: ["customerId"],
+        properties: {
+          kickoffCompletedAt: { type: "string" },
+          customerId: { type: "string" },
+        },
+      },
+    });
+
+    expect(reordered.contract.hash).toBe(first.contract.hash);
   });
 
   test("bumps version for additive changes", () => {

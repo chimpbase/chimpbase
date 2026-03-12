@@ -5,11 +5,11 @@ import {
   type Dialect,
   type Driver,
   Kysely,
-  type TransactionSettings,
+  PostgresAdapter,
+  PostgresIntrospector,
+  PostgresQueryCompiler,
   type QueryResult,
-  SqliteAdapter,
-  SqliteIntrospector,
-  SqliteQueryCompiler,
+  type TransactionSettings,
 } from "kysely";
 
 interface ChimpbaseKyselyExecutor {
@@ -70,11 +70,11 @@ class ChimpbaseKyselyDriver implements Driver {
   async destroy(): Promise<void> {}
 }
 
-class ChimpbaseSqliteDialect implements Dialect {
+class ChimpbasePostgresDialect implements Dialect {
   constructor(private readonly executor: ChimpbaseKyselyExecutor) {}
 
   createAdapter() {
-    return new SqliteAdapter();
+    return new PostgresAdapter();
   }
 
   createDriver(): Driver {
@@ -82,18 +82,18 @@ class ChimpbaseSqliteDialect implements Dialect {
   }
 
   createIntrospector(db: Kysely<any>): DatabaseIntrospector {
-    return new SqliteIntrospector(db);
+    return new PostgresIntrospector(db);
   }
 
   createQueryCompiler() {
-    return new SqliteQueryCompiler();
+    return new PostgresQueryCompiler();
   }
 }
 
-export function createSqliteKysely<TDatabase>(
+export function createPostgresKysely<TDatabase>(
   executor: ChimpbaseKyselyExecutor,
 ): Kysely<TDatabase> {
   return new Kysely<TDatabase>({
-    dialect: new ChimpbaseSqliteDialect(executor),
+    dialect: new ChimpbasePostgresDialect(executor),
   });
 }

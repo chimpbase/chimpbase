@@ -29,6 +29,13 @@ import type {
 } from "@chimpbase/runtime";
 
 import { computeNextCronFireTime } from "./cron.ts";
+import {
+  createDefaultChimpbasePlatformShim,
+  type ChimpbaseDrainOptions,
+  type ChimpbaseDrainResult,
+  type ChimpbasePlatformShim,
+  type ChimpbaseSecretsSource,
+} from "./host.ts";
 import type { ChimpbaseRegistry, ChimpbaseTelemetryPersistOverride } from "./index.ts";
 
 export interface ChimpbaseExecutionScope {
@@ -223,10 +230,9 @@ export interface ChimpbaseEngineAdapter {
 
 export interface ChimpbaseEngineOptions {
   adapter: ChimpbaseEngineAdapter;
+  platform?: ChimpbasePlatformShim;
   registry: ChimpbaseRegistry;
-  secrets: {
-    get(name: string): string | null;
-  };
+  secrets: ChimpbaseSecretsSource;
   telemetry: {
     minLevel: "debug" | "info" | "warn" | "error";
     persist: { log: boolean; metric: boolean; trace: boolean };
@@ -242,6 +248,7 @@ export class ChimpbaseEngine {
   private readonly adapter: ChimpbaseEngineAdapter;
   private readonly committedEvents: ChimpbaseEventRecord[] = [];
   private readonly pendingEvents: ChimpbaseEventRecord[] = [];
+  private readonly platform: ChimpbasePlatformShim;
   private readonly registry: ChimpbaseRegistry;
   private readonly secrets: ChimpbaseEngineOptions["secrets"];
   private readonly telemetryConfig: ChimpbaseEngineOptions["telemetry"];
@@ -251,6 +258,7 @@ export class ChimpbaseEngine {
 
   constructor(options: ChimpbaseEngineOptions) {
     this.adapter = options.adapter;
+    this.platform = options.platform ?? createDefaultChimpbasePlatformShim();
     this.registry = options.registry;
     this.secrets = options.secrets;
     this.telemetryConfig = options.telemetry;
@@ -355,9 +363,9 @@ export class ChimpbaseEngine {
     }
 
     return {
-      fireAt: new Date(fireAtMs).toISOString(),
+      fireAt: this.toTimestampIsoString(fireAtMs),
       fireAtMs,
-      nextFireAt: new Date(nextFireAtMs).toISOString(),
+      nextFireAt: this.toTimestampIsoString(nextFireAtMs),
       nextFireAtMs,
       scheduleName: claimed.schedule_name,
     };
@@ -366,6 +374,7 @@ export class ChimpbaseEngine {
   async syncRegisteredCrons(): Promise<void> {
     const persisted = await this.adapter.listCronSchedules();
     const persistedByName = new Map(persisted.map((row) => [row.schedule_name, row]));
+    const now = this.platform.now();
 
     for (const [name, registration] of this.registry.crons) {
       const existing = persistedByName.get(name);
@@ -374,7 +383,7 @@ export class ChimpbaseEngine {
         continue;
       }
 
-      const nextFireAtMs = computeNextCronFireTime(registration.schedule, Date.now());
+      const nextFireAtMs = computeNextCronFireTime(registration.schedule, now);
       await this.adapter.upsertCronSchedule(name, registration.schedule, nextFireAtMs);
       persistedByName.delete(name);
     }
@@ -421,6 +430,64 @@ export class ChimpbaseEngine {
       await this.failQueueJob(job.id, job.queue_name, message, job.attempt_count);
       throw error;
     }
+  }
+
+  async drain(options: ChimpbaseDrainOptions = {}): Promise<ChimpbaseDrainResult> {
+    const startedAtMs = this.platform.now();
+    const maxDurationMs = normalizeDrainMaxDuration(options.maxDurationMs);
+    const maxRuns = normalizeDrainMaxRuns(options.maxRuns);
+    let cronSchedules = 0;
+    let queueJobs = 0;
+
+    while (cronSchedules + queueJobs < maxRuns) {
+      if (this.platform.now() - startedAtMs >= maxDurationMs) {
+        return {
+          cronSchedules,
+          idle: false,
+          queueJobs,
+          runs: cronSchedules + queueJobs,
+          stopReason: "max_duration",
+        };
+      }
+
+      const scheduled = await this.processNextCronSchedule();
+      if (scheduled) {
+        cronSchedules += 1;
+        continue;
+      }
+
+      if (this.platform.now() - startedAtMs >= maxDurationMs) {
+        return {
+          cronSchedules,
+          idle: false,
+          queueJobs,
+          runs: cronSchedules + queueJobs,
+          stopReason: "max_duration",
+        };
+      }
+
+      const job = await this.processNextQueueJob();
+      if (job) {
+        queueJobs += 1;
+        continue;
+      }
+
+      return {
+        cronSchedules,
+        idle: true,
+        queueJobs,
+        runs: cronSchedules + queueJobs,
+        stopReason: "idle",
+      };
+    }
+
+    return {
+      cronSchedules,
+      idle: false,
+      queueJobs,
+      runs: cronSchedules + queueJobs,
+      stopReason: "max_runs",
+    };
   }
 
   drainTelemetryRecords(): ChimpbaseTelemetryRecord[] {
@@ -522,7 +589,7 @@ export class ChimpbaseEngine {
     }
 
     const invocation: ChimpbaseCronInvocation = {
-      fireAt: new Date(payload.fireAtMs).toISOString(),
+      fireAt: this.toTimestampIsoString(payload.fireAtMs),
       fireAtMs: payload.fireAtMs,
       name: payload.scheduleName,
       schedule: registration.schedule,
@@ -630,7 +697,7 @@ export class ChimpbaseEngine {
           labels,
           name,
           scope,
-          timestamp: new Date().toISOString(),
+          timestamp: this.timestampNow(),
           value,
         });
       },
@@ -652,7 +719,7 @@ export class ChimpbaseEngine {
           name,
           phase: "start",
           scope,
-          timestamp: new Date().toISOString(),
+          timestamp: this.timestampNow(),
         });
 
         try {
@@ -664,7 +731,7 @@ export class ChimpbaseEngine {
             phase: "end",
             scope,
             status: "ok",
-            timestamp: new Date().toISOString(),
+            timestamp: this.timestampNow(),
           });
           return result;
         } catch (error) {
@@ -678,7 +745,7 @@ export class ChimpbaseEngine {
             phase: "end",
             scope,
             status: "error",
-            timestamp: new Date().toISOString(),
+            timestamp: this.timestampNow(),
           });
           throw error;
         }
@@ -699,7 +766,7 @@ export class ChimpbaseEngine {
     options?: ChimpbaseWorkflowStartOptions,
   ): Promise<ChimpbaseWorkflowStartResult> {
     const definition = this.resolveWorkflowDefinition(definitionReference);
-    const workflowId = options?.workflowId ?? crypto.randomUUID();
+    const workflowId = options?.workflowId ?? this.platform.randomUUID();
 
     await this.adapter.query(
       `
@@ -831,7 +898,7 @@ export class ChimpbaseEngine {
       }
 
       if (row.status === "sleeping") {
-        if (row.wake_at_ms !== null && row.wake_at_ms > Date.now()) {
+        if (row.wake_at_ms !== null && row.wake_at_ms > this.platform.now()) {
           return;
         }
 
@@ -969,7 +1036,7 @@ export class ChimpbaseEngine {
               workflowId,
               definition.steps[row.current_step_index + 1]?.id ?? null,
               row.current_step_index + 1,
-              Date.now() + delayMs,
+              this.platform.now() + delayMs,
             ],
           );
           await this.adapter.queueEnqueue(
@@ -1028,12 +1095,13 @@ export class ChimpbaseEngine {
           const timeoutMs = typeof step.timeoutMs === "function"
             ? step.timeoutMs({ input, state, workflowId })
             : step.timeoutMs;
+          const now = this.platform.now();
           const wakeAtMs = typeof timeoutMs === "number"
-            ? Date.now() + Math.max(0, Math.floor(timeoutMs))
+            ? now + Math.max(0, Math.floor(timeoutMs))
             : null;
 
           if (row.status === "waiting_signal") {
-            if (row.wake_at_ms !== null && row.wake_at_ms <= Date.now()) {
+            if (row.wake_at_ms !== null && row.wake_at_ms <= now) {
               await this.handleWorkflowSignalTimeout(workflowId, row, step, input, state);
               continue;
             }
@@ -1041,7 +1109,7 @@ export class ChimpbaseEngine {
             return;
           }
 
-          if (wakeAtMs !== null && wakeAtMs <= Date.now()) {
+          if (wakeAtMs !== null && wakeAtMs <= now) {
             await this.handleWorkflowSignalTimeout(workflowId, row, step, input, state);
             continue;
           }
@@ -1063,7 +1131,7 @@ export class ChimpbaseEngine {
             await this.adapter.queueEnqueue(
               INTERNAL_WORKFLOW_QUEUE_NAME,
               { workflowId } satisfies WorkflowQueuePayload,
-              { delayMs: Math.max(0, wakeAtMs - Date.now()) },
+              { delayMs: Math.max(0, wakeAtMs - now) },
             );
           }
           return;
@@ -1233,7 +1301,7 @@ export class ChimpbaseEngine {
             workflowId,
             JSON.stringify(directive.state ?? null),
             directive.stepId ?? null,
-            Date.now() + directive.delayMs,
+            this.platform.now() + directive.delayMs,
           ],
         );
         await this.adapter.queueEnqueue(
@@ -1298,19 +1366,20 @@ export class ChimpbaseEngine {
     const timeoutMs = typeof directive.timeoutMs === "function"
       ? directive.timeoutMs({ input, state, workflowId })
       : directive.timeoutMs;
+    const now = this.platform.now();
     const wakeAtMs = typeof timeoutMs === "number"
-      ? Date.now() + Math.max(0, Math.floor(timeoutMs))
+      ? now + Math.max(0, Math.floor(timeoutMs))
       : null;
 
     if (row.status === "waiting_signal") {
-      if (row.wake_at_ms !== null && row.wake_at_ms <= Date.now()) {
+      if (row.wake_at_ms !== null && row.wake_at_ms <= now) {
         return await this.handleWorkflowRunSignalTimeout(workflowId, directive, input, state);
       }
 
       return false;
     }
 
-    if (wakeAtMs !== null && wakeAtMs <= Date.now()) {
+    if (wakeAtMs !== null && wakeAtMs <= now) {
       return await this.handleWorkflowRunSignalTimeout(workflowId, directive, input, state);
     }
 
@@ -1338,7 +1407,7 @@ export class ChimpbaseEngine {
       await this.adapter.queueEnqueue(
         INTERNAL_WORKFLOW_QUEUE_NAME,
         { workflowId } satisfies WorkflowQueuePayload,
-        { delayMs: Math.max(0, wakeAtMs - Date.now()) },
+        { delayMs: Math.max(0, wakeAtMs - now) },
       );
     }
 
@@ -1499,8 +1568,8 @@ export class ChimpbaseEngine {
   }
 
   private async claimWorkflowLease(workflowId: string): Promise<string | null> {
-    const now = Date.now();
-    const leaseToken = crypto.randomUUID();
+    const now = this.platform.now();
+    const leaseToken = this.platform.randomUUID();
     const leaseExpiresAtMs = now + this.worker.leaseMs;
 
     const [row] = await this.adapter.query<{ workflow_id: string }>(
@@ -1650,7 +1719,7 @@ export class ChimpbaseEngine {
         const envelope: ChimpbaseDlqEnvelope = {
           attempts,
           error: errorMessage,
-          failedAt: new Date().toISOString(),
+          failedAt: this.timestampNow(),
           payload: JSON.parse(payloadJson) as unknown,
           queue: queueName,
         };
@@ -1659,7 +1728,7 @@ export class ChimpbaseEngine {
     }
 
     const nextStatus = shouldDlq ? "dlq" : (attempts >= this.worker.maxAttempts ? "failed" : "pending");
-    const nextAvailableAtMs = Date.now() + this.worker.retryDelayMs;
+    const nextAvailableAtMs = this.platform.now() + this.worker.retryDelayMs;
     await this.adapter.markQueueJobFailure(jobId, nextStatus, nextAvailableAtMs, errorMessage);
   }
 
@@ -1675,8 +1744,16 @@ export class ChimpbaseEngine {
       level,
       message,
       scope,
-      timestamp: new Date().toISOString(),
+      timestamp: this.timestampNow(),
     });
+  }
+
+  private timestampNow(): string {
+    return this.toTimestampIsoString(this.platform.now());
+  }
+
+  private toTimestampIsoString(timestampMs: number): string {
+    return new Date(timestampMs).toISOString();
   }
 
   private takeCommittedEvents(): ChimpbaseEventRecord[] {
@@ -1717,4 +1794,20 @@ function createLogger(
       record("error", message, attributes);
     },
   };
+}
+
+function normalizeDrainMaxDuration(maxDurationMs?: number): number {
+  if (typeof maxDurationMs !== "number" || !Number.isFinite(maxDurationMs)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.max(0, Math.floor(maxDurationMs));
+}
+
+function normalizeDrainMaxRuns(maxRuns?: number): number {
+  if (typeof maxRuns !== "number" || !Number.isFinite(maxRuns)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.max(0, Math.floor(maxRuns));
 }

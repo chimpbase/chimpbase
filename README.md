@@ -150,7 +150,7 @@ This is the primitive for “do this later” or “do this out of band”.
 
 Use `cron(...)` for durable recurring schedules such as rollups, reminders and operational snapshots.
 
-In `0.1.3`, cron expressions use the standard 5-field shape in UTC and handlers run through the same worker path as queues.
+Cron expressions use the standard 5-field shape in UTC and handlers run through the same worker path as queues.
 
 ### `kv`
 
@@ -174,7 +174,7 @@ The runtime can load them from mounted files, environment variables and `.env`, 
 
 These primitives keep observability close to the code that matters, instead of forcing a separate abstraction layer for everything.
 
-Starting in `0.1.4`, telemetry can optionally be persisted into dedicated event streams for debugging and analytics. See the [Telemetry persistence](#telemetry-persistence) section below.
+Telemetry can optionally be persisted into dedicated event streams for debugging and analytics. See the [Telemetry persistence](#telemetry-persistence) section below.
 
 ### `action`
 
@@ -266,7 +266,7 @@ For a concrete example in this repo, see `examples/bun/todo-ts/src/modules/todos
 
 ## Telemetry persistence
 
-By default, `ctx.log`, `ctx.metric` and `ctx.trace` are collected in memory and available via `drainTelemetryRecords()`. Starting in `0.1.4`, you can optionally persist them into dedicated event streams backed by the same Postgres or SQLite storage.
+By default, `ctx.log`, `ctx.metric` and `ctx.trace` are collected in memory and available via `drainTelemetryRecords()`. You can also persist them into dedicated event streams backed by the same Postgres or SQLite storage.
 
 ### Enable globally
 
@@ -430,7 +430,7 @@ The repo currently ships with:
 
 ## Release model
 
-For `0.1.4`, the published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
+The published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
 
 That means:
 

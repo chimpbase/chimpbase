@@ -1,0 +1,45 @@
+{
+  "name": "@chimpbase/tooling",
+  "version": "0.1.5",
+  "description": "Local tooling, config loading and CLI helpers for Chimpbase.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chimpbase/chimpbase.git",
+    "directory": "packages/tooling"
+  },
+  "homepage": "https://github.com/chimpbase/chimpbase#readme",
+  "bugs": {
+    "url": "https://github.com/chimpbase/chimpbase/issues"
+  },
+  "keywords": [
+    "chimpbase",
+    "tooling",
+    "cli",
+    "config",
+    "schema"
+  ],
+  "files": [
+    "src"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts",
+    "./config": "./src/config.ts",
+    "./migrations": "./src/migrations.ts",
+    "./postgres_docker": "./src/postgres_docker.ts",
+    "./schema": "./src/schema.ts",
+    "./secrets": "./src/secrets.ts",
+    "./workflow_contracts": "./src/workflow_contracts.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@chimpbase/core": "workspace:^",
+    "@chimpbase/runtime": "workspace:^",
+    "kysely": "^0.28.11",
+    "pg": "^8.16.3"
+  }
+}

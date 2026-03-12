@@ -3,6 +3,7 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
+import { normalizeProjectConfig } from "../packages/core/index.ts";
 import { createChimpbase } from "../packages/bun/src/library.ts";
 import { ChimpbaseBunHost } from "../packages/bun/src/runtime.ts";
 
@@ -60,6 +61,172 @@ describe("chimpbase-bun runtime", () => {
       host.close();
     } finally {
       restoreEnv(previousEnv);
+    }
+  });
+
+  test("accepts explicit platform, secrets and migration sources", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-host-contract-"));
+    cleanupDirs.push(projectDir);
+
+    let now = Date.UTC(2026, 2, 11, 10, 0, 0);
+    let nextUuid = 0;
+    const host = await ChimpbaseBunHost.create({
+      config: normalizeProjectConfig({
+        project: { name: "host-contract" },
+        storage: {
+          engine: "sqlite",
+          path: "data/host-contract.db",
+        },
+        worker: {
+          retryDelayMs: 0,
+        },
+      }),
+      migrationSource: {
+        async list() {
+          return [
+            {
+              name: "001_worker_audit.sql",
+              sql: "CREATE TABLE IF NOT EXISTS worker_audit (id INTEGER PRIMARY KEY, value TEXT NOT NULL);",
+            },
+          ];
+        },
+      },
+      platform: {
+        hashString(input) {
+          return `hash:${input}`;
+        },
+        now() {
+          return now;
+        },
+        randomUUID() {
+          nextUuid += 1;
+          return `uuid-${nextUuid}`;
+        },
+      },
+      projectDir,
+      secrets: {
+        get(name: string) {
+          return name === "API_TOKEN" ? "secret-token" : null;
+        },
+      },
+    });
+
+    host.registerAction("readSecret", async (ctx, name) => ctx.secret(name as string));
+    host.registerAction("createNote", async (ctx, value) => ({
+      id: await ctx.collection.insert("notes", { value }),
+    }));
+    host.registerAction("enqueueAudit", async (ctx, value, delayMs) => {
+      await ctx.queue.enqueue("audit.job", { value }, { delayMs: delayMs as number });
+      return null;
+    });
+    host.registerAction(
+      "listAudit",
+      async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
+    );
+    host.registerWorker("audit.job", async (ctx, payload) => {
+      await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+    });
+
+    try {
+      const secret = await host.executeAction("readSecret", ["API_TOKEN"]);
+      expect(secret.result).toBe("secret-token");
+      expect(host.platform.hashString("chimpbase")).toBe("hash:chimpbase");
+
+      const created = await host.executeAction("createNote", ["note-1"]);
+      expect(created.result).toEqual({ id: "uuid-1" });
+
+      await host.executeAction("enqueueAudit", ["delayed-job", 5_000]);
+
+      const beforeDrain = await host.drain();
+      expect(beforeDrain).toEqual({
+        cronSchedules: 0,
+        idle: true,
+        queueJobs: 0,
+        runs: 0,
+        stopReason: "idle",
+      });
+
+      now += 5_000;
+
+      const afterDrain = await host.drain();
+      expect(afterDrain).toEqual({
+        cronSchedules: 0,
+        idle: true,
+        queueJobs: 1,
+        runs: 1,
+        stopReason: "idle",
+      });
+
+      const audit = await host.executeAction("listAudit");
+      expect(audit.result).toEqual([{ value: "delayed-job" }]);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("drain stops at maxRuns and can resume later", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-drain-"));
+    cleanupDirs.push(projectDir);
+
+    const processed: string[] = [];
+    const host = await ChimpbaseBunHost.create({
+      config: normalizeProjectConfig({
+        project: { name: "drain-contract" },
+        storage: { engine: "memory" },
+        worker: { retryDelayMs: 0 },
+      }),
+      platform: {
+        hashString(input) {
+          return `hash:${input}`;
+        },
+        now() {
+          return Date.UTC(2026, 2, 11, 11, 0, 0);
+        },
+        randomUUID() {
+          return "uuid-drain";
+        },
+      },
+      projectDir,
+      secrets: {
+        get() {
+          return null;
+        },
+      },
+    });
+
+    host.registerAction("enqueueJobs", async (ctx) => {
+      await ctx.queue.enqueue("batch.job", { value: "job-1" });
+      await ctx.queue.enqueue("batch.job", { value: "job-2" });
+      return null;
+    });
+    host.registerWorker("batch.job", async (_ctx, payload) => {
+      processed.push((payload as { value: string }).value);
+    });
+
+    try {
+      await host.executeAction("enqueueJobs");
+
+      const firstDrain = await host.drain({ maxRuns: 1 });
+      expect(firstDrain).toEqual({
+        cronSchedules: 0,
+        idle: false,
+        queueJobs: 1,
+        runs: 1,
+        stopReason: "max_runs",
+      });
+      expect(processed).toEqual(["job-1"]);
+
+      const secondDrain = await host.drain();
+      expect(secondDrain).toEqual({
+        cronSchedules: 0,
+        idle: true,
+        queueJobs: 1,
+        runs: 1,
+        stopReason: "idle",
+      });
+      expect(processed).toEqual(["job-1", "job-2"]);
+    } finally {
+      host.close();
     }
   });
 

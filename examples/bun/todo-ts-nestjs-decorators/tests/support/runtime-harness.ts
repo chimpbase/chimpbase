@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 const repoRoot = resolve(import.meta.dir, "../../../../../");
 const sourceProjectDir = resolve(repoRoot, "examples/bun/todo-ts-nestjs-decorators");
 const chimpbaseBunPackageDir = resolve(repoRoot, "packages/bun");
+const chimpbasePostgresPackageDir = resolve(repoRoot, "packages/postgres");
+const chimpbaseToolingPackageDir = resolve(repoRoot, "packages/tooling");
 const chimpbaseCorePackageDir = resolve(repoRoot, "packages/core");
 const runtimePackageDir = resolve(repoRoot, "packages/runtime");
 
@@ -86,6 +88,14 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
     recursive: true,
   });
   await cp(resolve(chimpbaseBunPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/bun/package.json"));
+  await cp(resolve(chimpbasePostgresPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/postgres/src"), {
+    recursive: true,
+  });
+  await cp(resolve(chimpbasePostgresPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/postgres/package.json"));
+  await cp(resolve(chimpbaseToolingPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/tooling/src"), {
+    recursive: true,
+  });
+  await cp(resolve(chimpbaseToolingPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/tooling/package.json"));
 
   await mkdir(resolve(projectDir, "data"), { recursive: true });
 

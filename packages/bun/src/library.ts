@@ -10,21 +10,21 @@ import {
 import {
   type ChimpbaseRouteHandler,
 } from "@chimpbase/runtime";
+import type {
+  ChimpbaseSchemaSyncOptions,
+  ChimpbaseSchemaSyncResult,
+} from "@chimpbase/tooling/schema";
+import {
+  syncChimpbaseSchemaArtifacts,
+} from "@chimpbase/tooling/schema";
+import type {
+  WorkflowContractSyncOptions,
+  WorkflowContractSyncResult,
+} from "@chimpbase/tooling/workflow_contracts";
 import {
   ChimpbaseBunHost,
   type ActionExecutionResult,
 } from "./runtime.ts";
-import type {
-  ChimpbaseSchemaSyncOptions,
-  ChimpbaseSchemaSyncResult,
-} from "./schema.ts";
-import {
-  syncChimpbaseSchemaArtifacts,
-} from "./schema.ts";
-import type {
-  WorkflowContractSyncOptions,
-  WorkflowContractSyncResult,
-} from "./workflow_contracts.ts";
 
 interface WorkerHandle {
   stop(): void;

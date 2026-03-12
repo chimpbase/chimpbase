@@ -80,10 +80,34 @@
     },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.1.3",
+      "version": "0.1.5",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
+      "dependencies": {
+        "@chimpbase/core": "workspace:^",
+        "@chimpbase/postgres": "workspace:^",
+        "@chimpbase/runtime": "workspace:^",
+        "@chimpbase/tooling": "workspace:^",
+        "kysely": "^0.28.11",
+      },
+      "devDependencies": {
+        "@types/node": "^24.6.1",
+        "bun-types": "^1.3.10",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/core": {
+      "name": "@chimpbase/core",
+      "version": "0.1.5",
+      "dependencies": {
+        "@chimpbase/runtime": "workspace:^",
+        "kysely": "^0.28.11",
+      },
+    },
+    "packages/postgres": {
+      "name": "@chimpbase/postgres",
+      "version": "0.1.5",
       "dependencies": {
         "@chimpbase/core": "workspace:^",
         "@chimpbase/runtime": "workspace:^",
@@ -91,25 +115,25 @@
         "pg": "^8.16.3",
       },
       "devDependencies": {
-        "@types/node": "^24.6.1",
         "@types/pg": "^8.15.6",
-        "bun-types": "^1.3.10",
         "typescript": "^5.9.3",
-      },
-    },
-    "packages/core": {
-      "name": "@chimpbase/core",
-      "version": "0.1.3",
-      "dependencies": {
-        "@chimpbase/runtime": "workspace:^",
-        "kysely": "^0.28.11",
       },
     },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.1.3",
+      "version": "0.1.5",
       "dependencies": {
         "kysely": "^0.28.11",
+      },
+    },
+    "packages/tooling": {
+      "name": "@chimpbase/tooling",
+      "version": "0.1.5",
+      "dependencies": {
+        "@chimpbase/core": "workspace:^",
+        "@chimpbase/runtime": "workspace:^",
+        "kysely": "^0.28.11",
+        "pg": "^8.16.3",
       },
     },
   },
@@ -128,7 +152,11 @@
 
     "@chimpbase/example-todo-ts-nestjs-decorators": ["@chimpbase/example-todo-ts-nestjs-decorators@workspace:examples/bun/todo-ts-nestjs-decorators"],
 
+    "@chimpbase/postgres": ["@chimpbase/postgres@workspace:packages/postgres"],
+
     "@chimpbase/runtime": ["@chimpbase/runtime@workspace:packages/runtime"],
+
+    "@chimpbase/tooling": ["@chimpbase/tooling@workspace:packages/tooling"],
 
     "@lukeed/csprng": ["@lukeed/csprng@1.1.0", "", {}, "sha512-Z7C/xXCiGWsg0KuKsHTKJxbWhpI3Vs5GwLfOean7MGyVFGqdRgBbAjOCh6u4bbjPc/8MJ2pZmK/0DLdCbivLDA=="],
 

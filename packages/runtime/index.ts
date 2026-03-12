@@ -1151,7 +1151,7 @@ function describeWorkflowSteps<TInput = unknown, TState = unknown>(
 }
 
 function computeWorkflowContractHash(contract: Omit<ChimpbaseWorkflowContract, "hash" | "version">): string {
-  return Bun.hash(stableSerialize(contract)).toString(16);
+  return hashDeterministicString(stableSerialize(contract));
 }
 
 function compareWorkflowSteps(
@@ -1326,6 +1326,21 @@ function mergeWorkflowCompatibility(
 
 function stableSerialize(value: unknown): string {
   return JSON.stringify(sortSerializableValue(value));
+}
+
+const DETERMINISTIC_HASH_OFFSET_BASIS = 0xcbf29ce484222325n;
+const DETERMINISTIC_HASH_PRIME = 0x100000001b3n;
+const textEncoder = new TextEncoder();
+
+function hashDeterministicString(input: string): string {
+  let hash = DETERMINISTIC_HASH_OFFSET_BASIS;
+
+  for (const byte of textEncoder.encode(input)) {
+    hash ^= BigInt(byte);
+    hash = BigInt.asUintN(64, hash * DETERMINISTIC_HASH_PRIME);
+  }
+
+  return hash.toString(16).padStart(16, "0");
 }
 
 function sortSerializableValue(value: unknown): unknown {

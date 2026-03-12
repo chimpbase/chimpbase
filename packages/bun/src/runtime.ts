@@ -1,19 +1,23 @@
-import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import {
   ChimpbaseEngine,
+  createDefaultChimpbasePlatformShim,
   type ChimpbaseEntrypointTarget,
+  type ChimpbaseDrainOptions,
+  type ChimpbaseDrainResult,
   type ChimpbaseEngineAdapter,
+  type ChimpbaseMigration,
+  type ChimpbaseMigrationSource,
+  type ChimpbasePlatformShim,
   createChimpbaseRegistry,
-  loadChimpbaseEntrypoint,
   type ChimpbaseActionExecutionResult,
   type ChimpbaseCronScheduleExecutionResult,
   type ChimpbaseProjectConfig,
   type ChimpbaseRegistry,
   type ChimpbaseQueueExecutionResult,
   type ChimpbaseRouteExecutionResult,
+  type ChimpbaseSecretsSource,
   type ChimpbaseTelemetryPersistOverride,
   type ChimpbaseTelemetryRecord,
   type ChimpbaseWorkerRegistration,
@@ -33,17 +37,29 @@ import {
   type ChimpbaseWorkflowContract,
   type ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
-
 import {
   loadProjectConfig,
-} from "./config.ts";
+} from "@chimpbase/tooling/config";
+import {
+  readSqlMigrations,
+  resolveLocalMigrationsDir,
+} from "@chimpbase/tooling/migrations";
+import {
+  loadLocalSecretStore,
+} from "@chimpbase/tooling/secrets";
+import {
+  syncRegisteredWorkflowContracts,
+  type WorkflowContractSyncOptions,
+  type WorkflowContractSyncResult,
+} from "@chimpbase/tooling/workflow_contracts";
 import {
   applyInlinePostgresMigrations,
   applyPostgresSqlMigrations,
   createPostgresEngineAdapter,
   ensurePostgresInternalTables,
   openPostgresPool,
-} from "./postgres_adapter.ts";
+} from "@chimpbase/postgres";
+
 import {
   applyInlineSqlMigrations,
   applySqlMigrations,
@@ -52,10 +68,8 @@ import {
   openSqliteDatabase,
 } from "./sqlite_adapter.ts";
 import {
-  syncRegisteredWorkflowContracts,
-  type WorkflowContractSyncOptions,
-  type WorkflowContractSyncResult,
-} from "./workflow_contracts.ts";
+  loadChimpbaseEntrypoint,
+} from "./entrypoint_loader.ts";
 
 interface RouteRequestLike {
   headers: Headers;
@@ -71,30 +85,29 @@ interface StorageHandle {
   close(): void | Promise<void>;
 }
 
-interface SecretStore {
-  get(name: string): string | null;
-}
-
 export type TelemetryRecord = ChimpbaseTelemetryRecord;
 export type ActionExecutionResult = ChimpbaseActionExecutionResult;
 export type CronScheduleExecutionResult = ChimpbaseCronScheduleExecutionResult;
 export type QueueExecutionResult = ChimpbaseQueueExecutionResult;
 export type RouteExecutionResult = ChimpbaseRouteExecutionResult;
+export type DrainOptions = ChimpbaseDrainOptions;
+export type DrainResult = ChimpbaseDrainResult;
 
-const DEFAULT_SECRETS_DIR = "/run/secrets";
-const DEFAULT_ENV_FILE = ".env";
-
-interface CreateHostOptions {
+export interface CreateHostOptions {
   config: ChimpbaseProjectConfig;
   entrypointPath?: string;
+  migrationSource?: ChimpbaseMigrationSource;
   migrationsDir?: string | null;
   migrationsSql?: string[];
+  platform?: ChimpbasePlatformShim;
   projectDir?: string;
+  secrets?: ChimpbaseSecretsSource;
 }
 
 export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
   readonly config: ChimpbaseProjectConfig;
   readonly engine: ChimpbaseEngine;
+  readonly platform: ChimpbasePlatformShim;
   readonly projectDir: string;
   readonly registry: ChimpbaseRegistry;
   private cronRegistryDirty = true;
@@ -104,12 +117,14 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
   private constructor(
     projectDir: string,
     config: ChimpbaseProjectConfig,
+    platform: ChimpbasePlatformShim,
     storage: StorageHandle,
     engine: ChimpbaseEngine,
     registry: ChimpbaseRegistry,
   ) {
     this.projectDir = projectDir;
     this.config = config;
+    this.platform = platform;
     this.storage = storage;
     this.engine = engine;
     this.registry = registry;
@@ -128,11 +143,23 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
 
   static async create(options: CreateHostOptions): Promise<ChimpbaseBunHost> {
     const projectDir = resolve(options.projectDir ?? ".");
+    const platform = options.platform ?? createDefaultChimpbasePlatformShim();
     const registry = createChimpbaseRegistry();
-    const { adapter, storage } = await openStorage(projectDir, options.config, options.migrationsDir ?? null, options.migrationsSql ?? []);
-    const secrets = await loadSecretStore(projectDir, options.config);
+    const { adapter, storage } = await openStorage(
+      projectDir,
+      options.config,
+      platform,
+      options.migrationSource ?? createLocalMigrationSource(options.config, options.migrationsDir ?? null),
+      options.migrationsSql ?? [],
+    );
+    const secrets = options.secrets ?? await loadLocalSecretStore(projectDir, options.config, {
+      env: process.env,
+      envFileDefault: Bun.env.CHIMPBASE_ENV_FILE ?? ".env",
+      secretsDirDefault: Bun.env.CHIMPBASE_SECRETS_DIR ?? "/run/secrets",
+    });
     const engine = new ChimpbaseEngine({
       adapter,
+      platform,
       registry,
       secrets,
       telemetry: {
@@ -141,7 +168,7 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
       },
       worker: options.config.worker,
     });
-    const host = new ChimpbaseBunHost(projectDir, options.config, storage, engine, registry);
+    const host = new ChimpbaseBunHost(projectDir, options.config, platform, storage, engine, registry);
 
     if (options.entrypointPath) {
       await loadChimpbaseEntrypoint(options.entrypointPath, host);
@@ -152,7 +179,7 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
         "__chimpbase.telemetry.cleanup",
         options.config.telemetry.retention.schedule,
         async (ctx) => {
-          const cutoffMs = Date.now() - options.config.telemetry.retention.maxAgeDays * 86_400_000;
+          const cutoffMs = platform.now() - options.config.telemetry.retention.maxAgeDays * 86_400_000;
           const cutoffTimestamp = new Date(cutoffMs).toISOString();
           await ctx.query(
             `DELETE FROM _chimpbase_stream_events WHERE stream_name IN ('_chimpbase.logs', '_chimpbase.metrics', '_chimpbase.traces') AND created_at < ?1`,
@@ -181,6 +208,11 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
   async processNextCronSchedule(): Promise<CronScheduleExecutionResult | null> {
     await this.syncCronSchedulesIfNeeded();
     return await this.engine.processNextCronSchedule();
+  }
+
+  async drain(options: DrainOptions = {}): Promise<DrainResult> {
+    await this.syncCronSchedulesIfNeeded();
+    return await this.engine.drain(options);
   }
 
   register(...entriesOrGroups: Array<ChimpbaseRegistration | readonly ChimpbaseRegistration[]>): this {
@@ -340,15 +372,9 @@ export class ChimpbaseBunHost implements ChimpbaseEntrypointTarget {
 
       running = true;
       try {
-        await this.syncCronSchedulesIfNeeded();
         while (!stopped) {
-          const scheduled = await this.processNextCronSchedule();
-          if (scheduled) {
-            continue;
-          }
-
-          const job = await this.processNextQueueJob();
-          if (!job) {
+          const outcome = await this.drain({ maxRuns: 1 });
+          if (outcome.idle) {
             break;
           }
         }
@@ -418,21 +444,19 @@ export function getRouteKey(request: RouteRequestLike): string {
 async function openStorage(
   projectDir: string,
   config: ChimpbaseProjectConfig,
-  migrationsDir: string | null,
+  platform: ChimpbasePlatformShim,
+  migrationSource: ChimpbaseMigrationSource,
   migrationsSql: string[],
 ): Promise<{ adapter: ChimpbaseEngineAdapter; storage: StorageHandle }> {
-  const resolvedMigrationsDir = await resolveMigrationsDir(
-    migrationsDir,
-    config.storage.engine,
-  );
+  const resolvedMigrations = await migrationSource.list();
 
   if (config.storage.engine === "postgres") {
     const pool = openPostgresPool(config);
-    await applyPostgresSqlMigrations(pool, resolvedMigrationsDir);
+    await applyPostgresSqlMigrations(pool, resolvedMigrations.map((migration) => migration.sql));
     await applyInlinePostgresMigrations(pool, migrationsSql);
     await ensurePostgresInternalTables(pool);
     return {
-      adapter: createPostgresEngineAdapter(pool),
+      adapter: createPostgresEngineAdapter(pool, platform),
       storage: {
         close() {
           return pool.end();
@@ -442,11 +466,11 @@ async function openStorage(
   }
 
   const db = await openSqliteDatabase(projectDir, config);
-  await applySqlMigrations(db, resolvedMigrationsDir);
+  await applySqlMigrations(db, resolvedMigrations.map((migration) => migration.sql));
   await applyInlineSqlMigrations(db, migrationsSql);
   await ensureSqliteInternalTables(db);
   return {
-    adapter: createSqliteEngineAdapter(db),
+    adapter: createSqliteEngineAdapter(db, platform),
     storage: {
       close() {
         db.close();
@@ -455,146 +479,16 @@ async function openStorage(
   };
 }
 
-async function resolveMigrationsDir(
-  migrationsDir: string | null,
-  engine: ChimpbaseProjectConfig["storage"]["engine"],
-): Promise<string | null> {
-  if (!migrationsDir) {
-    return null;
-  }
-
-  const engineDir = resolve(migrationsDir, engine);
-  return await directoryHasSqlFiles(engineDir) ? engineDir : migrationsDir;
-}
-
-async function directoryHasSqlFiles(path: string): Promise<boolean> {
-  try {
-    const entries = await readdir(path);
-    return entries.some((entry) => entry.endsWith(".sql"));
-  } catch {
-    return false;
-  }
-}
-
-async function loadSecretStore(
-  projectDir: string,
+function createLocalMigrationSource(
   config: ChimpbaseProjectConfig,
-): Promise<SecretStore> {
-  const values = new Map<string, string>();
-
-  const envFilePath = resolveSecretPath(
-    projectDir,
-    config.secrets.envFile ?? Bun.env.CHIMPBASE_ENV_FILE ?? DEFAULT_ENV_FILE,
-  );
-  if (envFilePath) {
-    await preloadDotenvFile(envFilePath, values);
-  }
-
-  for (const [name, value] of Object.entries(process.env)) {
-    if (typeof value === "string") {
-      values.set(name, value);
-    }
-  }
-
-  const secretsDirPath = resolveSecretPath(
-    projectDir,
-    config.secrets.dir ?? Bun.env.CHIMPBASE_SECRETS_DIR ?? DEFAULT_SECRETS_DIR,
-  );
-  if (secretsDirPath) {
-    await preloadSecretDirectory(secretsDirPath, values);
-  }
-
+  migrationsDir: string | null,
+): ChimpbaseMigrationSource {
   return {
-    get(name: string): string | null {
-      return values.get(name) ?? null;
+    async list(): Promise<ChimpbaseMigration[]> {
+      return await readSqlMigrations(await resolveLocalMigrationsDir(
+        migrationsDir,
+        config.storage.engine,
+      ));
     },
   };
-}
-
-async function preloadDotenvFile(path: string, values: Map<string, string>): Promise<void> {
-  let raw: string;
-  try {
-    raw = await Bun.file(path).text();
-  } catch {
-    return;
-  }
-
-  for (const [name, value] of parseDotenv(raw)) {
-    values.set(name, value);
-  }
-}
-
-async function preloadSecretDirectory(path: string, values: Map<string, string>): Promise<void> {
-  let entries: Dirent<string>[];
-  try {
-    entries = await readdir(path, { withFileTypes: true });
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    if (!entry.isFile()) {
-      continue;
-    }
-
-    values.set(entry.name, await Bun.file(resolve(path, entry.name)).text());
-  }
-}
-
-function resolveSecretPath(projectDir: string, path: string | null): string | null {
-  if (!path) {
-    return null;
-  }
-
-  return isAbsolute(path) ? path : resolve(projectDir, path);
-}
-
-function parseDotenv(raw: string): Map<string, string> {
-  const values = new Map<string, string>();
-
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const normalized = trimmed.startsWith("export ")
-      ? trimmed.slice("export ".length).trimStart()
-      : trimmed;
-    const separatorIndex = normalized.indexOf("=");
-    if (separatorIndex < 1) {
-      continue;
-    }
-
-    const name = normalized.slice(0, separatorIndex).trim();
-    const rawValue = normalized.slice(separatorIndex + 1);
-    values.set(name, parseDotenvValue(rawValue));
-  }
-
-  return values;
-}
-
-function parseDotenvValue(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  const firstCharacter = trimmed[0];
-  const isQuoted = (firstCharacter === '"' || firstCharacter === "'") && trimmed.endsWith(firstCharacter);
-  if (isQuoted) {
-    const inner = trimmed.slice(1, -1);
-    if (firstCharacter === '"') {
-      return inner
-        .replace(/\\n/g, "\n")
-        .replace(/\\r/g, "\r")
-        .replace(/\\t/g, "\t")
-        .replace(/\\"/g, '"')
-        .replace(/\\\\/g, "\\");
-    }
-
-    return inner;
-  }
-
-  return trimmed.replace(/\s+#.*$/, "");
 }

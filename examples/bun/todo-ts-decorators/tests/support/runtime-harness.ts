@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 const repoRoot = resolve(import.meta.dir, "../../../../../");
 const sourceProjectDir = resolve(repoRoot, "examples/bun/todo-ts-decorators");
 const chimpbaseBunPackageDir = resolve(repoRoot, "packages/bun");
+const chimpbasePostgresPackageDir = resolve(repoRoot, "packages/postgres");
+const chimpbaseToolingPackageDir = resolve(repoRoot, "packages/tooling");
 const workspaceNodeModulesDir = resolve(repoRoot, "node_modules");
 const chimpbaseCorePackageDir = resolve(repoRoot, "packages/core");
 const runtimePackageDir = resolve(repoRoot, "packages/runtime");
@@ -57,8 +59,9 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
         private: true,
         dependencies: {
           "@chimpbase/core": "file:./node_modules/@chimpbase/core",
-        "@chimpbase/runtime": "file:./node_modules/@chimpbase/runtime",
+          "@chimpbase/runtime": "file:./node_modules/@chimpbase/runtime",
           "@chimpbase/bun": "file:./node_modules/@chimpbase/bun",
+          "@chimpbase/tooling": "file:./node_modules/@chimpbase/tooling",
           hono: "^4.12.5",
           kysely: "^0.28.11",
         },
@@ -87,6 +90,14 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
       recursive: true,
     });
     await cp(resolve(chimpbaseBunPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/bun/package.json"));
+    await cp(resolve(chimpbasePostgresPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/postgres/src"), {
+      recursive: true,
+    });
+    await cp(resolve(chimpbasePostgresPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/postgres/package.json"));
+    await cp(resolve(chimpbaseToolingPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/tooling/src"), {
+      recursive: true,
+    });
+    await cp(resolve(chimpbaseToolingPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/tooling/package.json"));
 
     await cp(resolve(workspaceNodeModulesDir, "hono"), resolve(projectDir, "node_modules", "hono"), {
       recursive: true,
