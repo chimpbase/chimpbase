@@ -684,6 +684,12 @@ export type ChimpbaseRegistration =
   | ChimpbaseWorkflowRegistration<any, any>;
 
 type ChimpbaseAnyRegistration = ChimpbaseRegistration;
+export type ChimpbaseRegistrationGroup = readonly ChimpbaseRegistration[];
+export type ChimpbaseRegistrationMap = Record<string, ChimpbaseRegistration | ChimpbaseRegistrationGroup>;
+export type ChimpbaseRegistrationSource =
+  | ChimpbaseRegistration
+  | ChimpbaseRegistrationGroup
+  | ChimpbaseRegistrationMap;
 
 type ChimpbaseDecoratedOwner = object;
 type ChimpbaseDecoratorMethod = (...args: any[]) => unknown;
@@ -1053,14 +1059,45 @@ export function compareWorkflowContracts(
 }
 
 function flattenChimpbaseEntries(
-  entriesOrGroups: ReadonlyArray<ChimpbaseRegistration | readonly ChimpbaseRegistration[]>,
+  entriesOrGroups: ReadonlyArray<ChimpbaseRegistrationSource>,
 ): readonly ChimpbaseAnyRegistration[] {
-  return entriesOrGroups.flatMap((entryOrGroup) => Array.isArray(entryOrGroup) ? entryOrGroup : [entryOrGroup]) as readonly ChimpbaseAnyRegistration[];
+  const flattened: ChimpbaseAnyRegistration[] = [];
+
+  for (const entryOrGroup of entriesOrGroups) {
+    if (Array.isArray(entryOrGroup)) {
+      flattened.push(...entryOrGroup);
+      continue;
+    }
+
+    if (isChimpbaseRegistration(entryOrGroup)) {
+      flattened.push(entryOrGroup);
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(entryOrGroup)) {
+      if (Array.isArray(value)) {
+        flattened.push(...value);
+        continue;
+      }
+
+      if (!isChimpbaseRegistration(value)) {
+        throw new Error(`invalid registration map entry for key "${key}"`);
+      }
+
+      if (isChimpbaseActionRegistration(value) && !hasChimpbaseActionRegistrationName(value)) {
+        setChimpbaseActionRegistrationName(value, key);
+      }
+
+      flattened.push(value);
+    }
+  }
+
+  return flattened;
 }
 
 export function register(
   target: ChimpbaseRegistrationTarget,
-  ...entriesOrGroups: Array<ChimpbaseRegistration | readonly ChimpbaseRegistration[]>
+  ...entriesOrGroups: ChimpbaseRegistrationSource[]
 ): void {
   for (const entry of flattenChimpbaseEntries(entriesOrGroups)) {
     switch (entry.kind) {
@@ -1525,6 +1562,20 @@ export function isChimpbaseActionRegistration(value: unknown): value is Chimpbas
       && (value as { kind?: unknown }).kind === "action"
       && typeof (value as { name?: unknown }).name === "string"
       && "handler" in (value as object),
+  );
+}
+
+function isChimpbaseRegistration(value: unknown): value is ChimpbaseRegistration {
+  return Boolean(
+    value
+      && (typeof value === "object" || typeof value === "function")
+      && (
+        (value as { kind?: unknown }).kind === "action"
+        || (value as { kind?: unknown }).kind === "cron"
+        || (value as { kind?: unknown }).kind === "subscription"
+        || (value as { kind?: unknown }).kind === "worker"
+        || (value as { kind?: unknown }).kind === "workflow"
+      ),
   );
 }
 

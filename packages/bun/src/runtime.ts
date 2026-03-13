@@ -44,6 +44,7 @@ import {
   type ChimpbaseInferActionArgs,
   type ChimpbaseInferActionResult,
   type ChimpbaseRegistration,
+  type ChimpbaseRegistrationSource,
   type ChimpbaseRouteEnv,
   type ChimpbaseRouteHandler,
   type ChimpbaseSubscriptionHandler,
@@ -357,7 +358,7 @@ export class ChimpbaseBunHost {
     return outcome;
   }
 
-  register(...entriesOrGroups: Array<ChimpbaseRegistration | readonly ChimpbaseRegistration[]>): this {
+  register(...entriesOrGroups: ChimpbaseRegistrationSource[]): this {
     registerEntries(this, ...entriesOrGroups);
     return this;
   }

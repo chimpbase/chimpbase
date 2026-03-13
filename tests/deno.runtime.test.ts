@@ -809,6 +809,43 @@ describe("chimpbase-deno runtime guards", () => {
         host.close();
       }
     });
+
+    test("infers an unnamed action name from register({ key })", async () => {
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-register-map-"));
+      cleanupDirs.push(projectDir);
+
+      installFakeDenoRuntime({
+        env: {},
+      });
+
+      const host = await ChimpbaseDenoHost.create({
+        config: normalizeProjectConfig({
+          project: { name: "deno-register-map" },
+          storage: {
+            engine: "memory",
+          },
+        }),
+        projectDir,
+      });
+
+      const health = action({
+        async handler() {
+          return { ok: true };
+        },
+      });
+
+      try {
+        host.register({ health });
+
+        expect(health.name).toBe("health");
+        await expect(health()).resolves.toEqual({ ok: true });
+
+        const outcome = await host.executeAction("health");
+        expect(outcome.result).toEqual({ ok: true });
+      } finally {
+        host.close();
+      }
+    });
   }
 
   test("requires a postgres url when opening storage", async () => {

@@ -317,6 +317,39 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("infers an unnamed action name from register({ key })", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-register-map-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      app: defineChimpbaseApp({
+        project: { name: "register-map" },
+      }),
+      projectDir,
+      storage: {
+        engine: "memory",
+      },
+    });
+
+    const health = action({
+      async handler() {
+        return { ok: true };
+      },
+    });
+
+    try {
+      host.register({ health });
+
+      expect(health.name).toBe("health");
+      await expect(health()).resolves.toEqual({ ok: true });
+
+      const outcome = await host.executeAction("health");
+      expect(outcome.result).toEqual({ ok: true });
+    } finally {
+      host.close();
+    }
+  });
+
   test("emits runtime debug logs when enabled", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-debug-logs-"));
     cleanupDirs.push(projectDir);

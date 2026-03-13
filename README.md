@@ -123,10 +123,9 @@ const health = action({
   async handler() {
     return { ok: true };
   },
-  name: "health",
 });
 
-chimpbase.register(health);
+chimpbase.register({ health });
 
 await chimpbase.start();
 ```
@@ -340,7 +339,7 @@ export default {
 };
 ```
 
-In that case the inferred action id is `chimpbase.app.ts#createCustomer`. If you register a bare action manually with `chimpbase.register(...)` outside app module loading, `name` is still required because there is no stable export identity to derive from.
+In that case the inferred action id is `chimpbase.app.ts#createCustomer`. Outside app module loading, you can also infer the id from the registration key with `chimpbase.register({ createCustomer })`, which assigns the action name `createCustomer`. Only the bare `chimpbase.register(createCustomer)` form still requires an explicit `name`.
 
 ## Quick start
 

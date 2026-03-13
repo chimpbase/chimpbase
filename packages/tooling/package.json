@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/tooling",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Local tooling, config loading and CLI helpers for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -38,8 +38,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@chimpbase/core": "0.1.21",
-    "@chimpbase/runtime": "0.1.21",
+    "@chimpbase/core": "0.1.22",
+    "@chimpbase/runtime": "0.1.22",
     "kysely": "^0.28.11",
     "pg": "^8.16.3"
   }
