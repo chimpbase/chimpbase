@@ -325,6 +325,63 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("serializes sqlite-style engine operations across actions and worker drains", async () => {
+      const order: string[] = [];
+      const host = Object.create(ChimpbaseDenoHost.prototype) as Record<string, unknown>;
+      host.config = normalizeProjectConfig({
+        project: { name: "deno-sqlite-serialization" },
+        storage: { engine: "memory" },
+      });
+      host.cronRegistryDirty = false;
+      host.cronSyncPromise = null;
+      host.engine = {
+        async drain() {
+          order.push("drain:start");
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          order.push("drain:end");
+          return {
+            cronSchedules: 0,
+            idle: true,
+            queueJobs: 0,
+            runs: 0,
+            stopReason: "idle" as const,
+          };
+        },
+        async executeAction(name: string, args: unknown[]) {
+          order.push(`action:${name}:start`);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          order.push(`action:${name}:end`);
+          return {
+            emittedEvents: [],
+            result: { args, name },
+          };
+        },
+      };
+      host.serializedEngineOperations = Promise.resolve();
+      const typedHost = host as unknown as ChimpbaseDenoHost;
+
+      const actionPromise = typedHost.executeAction("health");
+      const drainPromise = typedHost.drain({ maxRuns: 1 });
+
+      await expect(actionPromise).resolves.toEqual({
+        emittedEvents: [],
+        result: { args: [], name: "health" },
+      });
+      await expect(drainPromise).resolves.toEqual({
+        cronSchedules: 0,
+        idle: true,
+        queueJobs: 0,
+        runs: 0,
+        stopReason: "idle",
+      });
+      expect(order).toEqual([
+        "action:health:start",
+        "action:health:end",
+        "drain:start",
+        "drain:end",
+      ]);
+    });
+
     test("dispatches postgres subscriptions across Deno hosts", async () => {
       const database = await postgres.createDatabase("deno_cross_process_subscriptions");
       const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-cross-process-"));

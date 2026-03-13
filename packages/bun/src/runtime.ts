@@ -128,6 +128,7 @@ export class ChimpbaseBunHost {
   readonly registry: ChimpbaseRegistry;
   private cronRegistryDirty = true;
   private cronSyncPromise: Promise<void> | null = null;
+  private serializedEngineOperations: Promise<void> = Promise.resolve();
   private readonly storage: StorageHandle;
 
   private constructor(
@@ -212,34 +213,38 @@ export class ChimpbaseBunHost {
     ...args: unknown[]
   ): Promise<ActionExecutionResult> {
     if (typeof nameOrReference === "string") {
-      return await this.engine.executeAction(
+      return await this.runEngineOperation(async () => await this.engine.executeAction(
         nameOrReference,
         normalizeActionExecutionArgs(args[0]),
-      );
+      ));
     }
 
-    return await this.engine.executeAction(
+    return await this.runEngineOperation(async () => await this.engine.executeAction(
       nameOrReference.name,
       normalizeReferenceInvocationArgs(nameOrReference, args),
-    );
+    ));
   }
 
   async executeRoute(request: Request): Promise<RouteExecutionResult> {
-    return await this.engine.executeRoute(request);
+    return await this.runEngineOperation(async () => await this.engine.executeRoute(request));
   }
 
   async processNextQueueJob(): Promise<QueueExecutionResult | null> {
-    return await this.engine.processNextQueueJob();
+    return await this.runEngineOperation(async () => await this.engine.processNextQueueJob());
   }
 
   async processNextCronSchedule(): Promise<CronScheduleExecutionResult | null> {
-    await this.syncCronSchedulesIfNeeded();
-    return await this.engine.processNextCronSchedule();
+    return await this.runEngineOperation(async () => {
+      await this.syncCronSchedulesIfNeeded();
+      return await this.engine.processNextCronSchedule();
+    });
   }
 
   async drain(options: DrainOptions = {}): Promise<DrainResult> {
-    await this.syncCronSchedulesIfNeeded();
-    return await this.engine.drain(options);
+    return await this.runEngineOperation(async () => {
+      await this.syncCronSchedulesIfNeeded();
+      return await this.engine.drain(options);
+    });
   }
 
   register(...entriesOrGroups: Array<ChimpbaseRegistration | readonly ChimpbaseRegistration[]>): this {
@@ -524,6 +529,15 @@ export class ChimpbaseBunHost {
   close(): void {
     this.engine.stopEventBus();
     void this.storage.close();
+  }
+
+  private async runEngineOperation<TResult>(operation: () => Promise<TResult>): Promise<TResult> {
+    const queued = this.serializedEngineOperations
+      .catch(() => undefined)
+      .then(operation);
+
+    this.serializedEngineOperations = queued.then(() => undefined, () => undefined);
+    return await queued;
   }
 
   private async syncCronSchedulesIfNeeded(): Promise<void> {

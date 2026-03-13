@@ -285,6 +285,56 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("allows calling registered action refs while the sqlite worker loop is active", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-direct-action-worker-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      app: defineChimpbaseApp({
+        project: { name: "direct-action-worker" },
+        worker: {
+          retryDelayMs: 0,
+        },
+      }),
+      projectDir,
+      storage: {
+        engine: "sqlite",
+        path: "data/direct-action-worker.db",
+      },
+      workerRuntime: {
+        pollIntervalMs: 1,
+      },
+    });
+
+    const health = action({
+      async handler() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { ok: true };
+      },
+      name: "healthDirectWorker",
+    });
+
+    host.register(health);
+
+    const originalConsoleError = console.error;
+    const workerErrors: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      workerErrors.push(args);
+    };
+
+    const started = host.start({ serve: false });
+
+    try {
+      await expect(health()).resolves.toEqual({ ok: true });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(workerErrors).toEqual([]);
+    } finally {
+      console.error = originalConsoleError;
+      await started.stop();
+      host.close();
+    }
+  });
+
   test("accepts typed TS migrations in createChimpbase options", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-typed-migrations-"));
     cleanupDirs.push(projectDir);
