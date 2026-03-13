@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/bun",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Bun host for building action-driven backends on Postgres with minimal boilerplate.",
   "license": "Apache-2.0",
   "type": "module",

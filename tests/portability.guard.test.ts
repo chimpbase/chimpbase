@@ -23,6 +23,14 @@ const bannedChecks = [
   },
 ] as const;
 
+const allowedPortableImports = [
+  {
+    file: "packages/runtime/index.ts",
+    label: "node builtins",
+    pattern: /\bfrom\s+["']node:async_hooks["']/,
+  },
+] as const;
+
 describe("portable package guards", () => {
   for (const packageName of ["core", "runtime", "postgres"] as const) {
     test(`@chimpbase/${packageName} stays free of host-specific APIs`, async () => {
@@ -34,7 +42,10 @@ describe("portable package guards", () => {
         const source = stripComments(await readFile(file, "utf8"));
 
         for (const check of bannedChecks) {
-          if (check.pattern.test(source)) {
+          if (
+            check.pattern.test(source)
+            && !isAllowedPortableImport(relative(repoRoot, file), check.label, source)
+          ) {
             violations.push(`${relative(repoRoot, file)}: found ${check.label}`);
           }
         }
@@ -58,12 +69,33 @@ describe("portable package guards", () => {
 
     expect(violations).toEqual([]);
   });
+
+  test("@chimpbase/core publishes the internal files its entrypoint imports", async () => {
+    const manifest = JSON.parse(
+      await readFile(resolve(repoRoot, "packages/core/package.json"), "utf8"),
+    ) as { files?: string[] };
+
+    expect(manifest.files).toEqual([
+      "*.ts",
+      "README.md",
+      "LICENSE",
+      "NOTICE",
+    ]);
+  });
 });
 
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/.*/g, "");
+}
+
+function isAllowedPortableImport(relativePath: string, label: string, source: string): boolean {
+  return allowedPortableImports.some((entry) =>
+    entry.file === relativePath
+    && entry.label === label
+    && entry.pattern.test(source)
+  );
 }
 
 async function listTypescriptFiles(dir: string): Promise<string[]> {
