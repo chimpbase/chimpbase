@@ -1,6 +1,7 @@
 import type { Kysely } from "kysely";
 
 import type {
+  ChimpbaseActionRegistration,
   ChimpbaseCollectionFilter,
   ChimpbaseCollectionFindOptions,
   ChimpbaseCollectionPatch,
@@ -583,9 +584,9 @@ export class ChimpbaseEngine {
   createRouteEnv(): ChimpbaseRouteEnv {
     return {
       action: async <TArgs extends unknown[] = unknown[], TResult = unknown>(
-        name: string,
+        nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
         ...args: TArgs
-      ): Promise<TResult> => await this.invokeActionByName<TResult>(name, args),
+      ): Promise<TResult> => await this.invokeAction<TResult>(nameOrReference, args),
     };
   }
 
@@ -767,9 +768,9 @@ export class ChimpbaseEngine {
         }
       },
       action: async <TArgs extends unknown[] = unknown[], TResult = unknown>(
-        name: string,
+        nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
         ...args: TArgs
-      ): Promise<TResult> => await this.invokeActionByName<TResult>(name, args),
+      ): Promise<TResult> => await this.invokeAction<TResult>(nameOrReference, args),
     };
   }
 
@@ -983,7 +984,7 @@ export class ChimpbaseEngine {
           const args = step.args
             ? step.args({ input, state, workflowId })
             : [];
-          const result = await this.invokeActionByName(step.action, args ?? []);
+          const result = await this.invokeActionByName(step.action, normalizeActionArgs(args));
           const nextState = step.onResult
             ? step.onResult({ input, result, state, workflowId })
             : state;
@@ -1163,8 +1164,10 @@ export class ChimpbaseEngine {
   ): ChimpbaseWorkflowRunContext<TInput, TState> {
     return {
       ...params,
-      action: async <TResult = unknown>(name: string, ...args: unknown[]): Promise<TResult> =>
-        await this.invokeActionByName<TResult>(name, args),
+      action: async <TResult = unknown>(
+        nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
+        ...args: unknown[]
+      ): Promise<TResult> => await this.invokeAction<TResult>(nameOrReference, args),
       complete: (state = params.state, options) => ({
         kind: "workflow_complete" as const,
         state,
@@ -1663,17 +1666,47 @@ export class ChimpbaseEngine {
     return row ?? null;
   }
 
+  private async invokeAction<TResult = unknown>(
+    nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
+    args: unknown[],
+  ): Promise<TResult> {
+    if (typeof nameOrReference === "string") {
+      return await this.invokeActionByName<TResult>(nameOrReference, args);
+    }
+
+    return await this.invokeActionByName<TResult>(
+      nameOrReference.name,
+      normalizeActionReferenceArgs(nameOrReference, args),
+    );
+  }
+
   private async invokeActionByName<TResult = unknown>(
     name: string,
     args: unknown[],
   ): Promise<TResult> {
-    const handler = this.registry.actions.get(name);
-    if (!handler) {
+    const registration = this.registry.actions.get(name);
+    if (!registration) {
       throw new Error(`action not found: ${name}`);
     }
 
     return await this.runInTransaction(async () => {
-      return await handler(this.createContext({ kind: "action", name }), ...args) as TResult;
+      const context = this.createContext({ kind: "action", name });
+      if (registration.args) {
+        if (args.length > 1) {
+          throw new Error(`action ${name} expects a single argument`);
+        }
+
+        const parsedArgs = registration.args.parse(args[0], "args");
+        return await (registration.handler as (ctx: ChimpbaseContext, args: unknown) => TResult | Promise<TResult>)(
+          context,
+          parsedArgs,
+        );
+      }
+
+      return await (registration.handler as (ctx: ChimpbaseContext, ...args: unknown[]) => TResult | Promise<TResult>)(
+        context,
+        ...args,
+      );
     });
   }
 
@@ -1784,6 +1817,29 @@ export class ChimpbaseEngine {
   private takeCommittedEvents(): ChimpbaseEventRecord[] {
     return this.committedEvents.splice(0);
   }
+}
+
+function normalizeActionArgs(args: unknown): unknown[] {
+  if (args === undefined) {
+    return [];
+  }
+
+  return Array.isArray(args) ? args : [args];
+}
+
+function normalizeActionReferenceArgs(
+  reference: ChimpbaseActionRegistration<any, any, any>,
+  args: unknown[],
+): unknown[] {
+  if (!reference.args) {
+    return args;
+  }
+
+  if (args.length > 1) {
+    throw new Error(`action ${reference.name} expects a single argument`);
+  }
+
+  return args.length === 0 ? [] : [args[0]];
 }
 
 function hasWorkflowRun<TInput = unknown, TState = unknown>(

@@ -2,6 +2,7 @@ import type {
   ChimpbaseContext,
   ChimpbaseCronInvocation,
 } from "@chimpbase/runtime";
+import { action } from "@chimpbase/runtime";
 import type {
   TodoBacklogSnapshotRecord,
   TodoDashboard,
@@ -54,15 +55,18 @@ const captureTodoBacklogSnapshot = async (
   });
 };
 
-const listTodoBacklogSnapshots = async (
-  ctx: ChimpbaseContext,
-): Promise<TodoBacklogSnapshotRecord[]> => {
-  return await ctx.collection.find<TodoBacklogSnapshotRecord>(
-    "todo_backlog_snapshots",
-    {},
-    { limit: 50 },
-  );
-};
+const listTodoBacklogSnapshots = action({
+  async handler(
+    ctx: ChimpbaseContext,
+  ): Promise<TodoBacklogSnapshotRecord[]> {
+    return await ctx.collection.find<TodoBacklogSnapshotRecord>(
+      "todo_backlog_snapshots",
+      {},
+      { limit: 50 },
+    );
+  },
+  name: "listTodoBacklogSnapshots",
+});
 
 export {
   captureTodoBacklogSnapshot,

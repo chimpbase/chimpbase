@@ -11,6 +11,7 @@ import {
 } from "../packages/core/index.ts";
 import { createChimpbaseDeno, loadChimpbaseProject as loadChimpbaseDenoProject } from "../packages/deno/src/library.ts";
 import { ChimpbaseDenoHost } from "../packages/deno/src/runtime.ts";
+import { action, v } from "../packages/runtime/index.ts";
 import {
   canUseDocker,
   startPostgresDocker,
@@ -221,6 +222,93 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("supports validator-backed action references", async () => {
+      const database = await postgres.createDatabase("deno_action_refs");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-action-refs-"));
+      cleanupDirs.push(projectDir);
+
+      installFakeDenoRuntime({
+        env: {},
+      });
+
+      const host = await ChimpbaseDenoHost.create({
+        config: normalizeProjectConfig({
+          project: { name: "deno-action-refs" },
+          storage: {
+            engine: "postgres",
+            url: database.url,
+          },
+        }),
+        projectDir,
+      });
+
+      const createAccount = action({
+        args: v.object({
+          email: v.string(),
+          name: v.string(),
+        }),
+        async handler(_ctx, input) {
+          return {
+            email: input.email,
+            name: input.name,
+            slug: input.name.toLowerCase(),
+          };
+        },
+        name: "createDenoAccountRef",
+      });
+
+      const seedAccounts = action({
+        args: v.object({
+          accounts: v.array(
+            v.object({
+              email: v.string(),
+              name: v.string(),
+            }),
+          ),
+        }),
+        async handler(ctx, input) {
+          const created = [];
+          for (const account of input.accounts) {
+            created.push(await ctx.action(createAccount, account));
+          }
+
+          return {
+            created,
+            total: created.length,
+          };
+        },
+        name: "seedDenoAccountsRef",
+      });
+
+      host.register(createAccount, seedAccounts);
+
+      try {
+        const seeded = await host.executeAction(seedAccounts, {
+          accounts: [
+            { email: "alice@deno.test", name: "Alice" },
+            { email: "bruno@deno.test", name: "Bruno" },
+          ],
+        });
+
+        expect(seeded.result).toEqual({
+          created: [
+            { email: "alice@deno.test", name: "Alice", slug: "alice" },
+            { email: "bruno@deno.test", name: "Bruno", slug: "bruno" },
+          ],
+          total: 2,
+        });
+
+        await expect(
+          host.executeAction(createAccount, {
+            email: 10,
+            name: "Broken",
+          } as never),
+        ).rejects.toThrow("args.email must be a string");
+      } finally {
+        host.close();
+      }
+    }, 30000);
+
     test("dispatches postgres subscriptions across Deno hosts", async () => {
       const database = await postgres.createDatabase("deno_cross_process_subscriptions");
       const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-deno-cross-process-"));
@@ -372,17 +460,13 @@ if (!dockerAvailable) {
             kind: "subscription",
           },
           {
-            handler: async (ctx, value) => {
+            ...action("enqueueAudit", async (ctx, value) => {
               ctx.pubsub.publish("audit.created", { value });
               return { queued: value };
-            },
-            kind: "action",
-            name: "enqueueAudit",
+            }),
           },
           {
-            handler: async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
-            kind: "action",
-            name: "listAudit",
+            ...action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),
           },
           {
             definition: undefined,

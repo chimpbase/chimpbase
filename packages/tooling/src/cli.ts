@@ -25,7 +25,7 @@ interface StartedProject {
 export interface RunChimpbaseCliDependencies {
   runAction(
     actionName: string,
-    args?: unknown[],
+    args?: unknown[] | unknown,
     options?: { projectDir?: string },
   ): Promise<{ host: CliHost; outcome: ActionOutcome }>;
   startProject(
@@ -110,9 +110,6 @@ export async function runChimpbaseCli(
 
   if (typeof args.action === "string") {
     const actionArgs = typeof args.args === "string" ? JSON.parse(args.args) : [];
-    if (!Array.isArray(actionArgs)) {
-      throw new Error("--args must be a JSON array");
-    }
 
     const { host, outcome } = await dependencies.runAction(args.action, actionArgs, {
       projectDir,

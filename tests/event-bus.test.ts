@@ -14,6 +14,7 @@ import {
   createSqliteEngineAdapter,
   ensureSqliteInternalTables,
 } from "../packages/bun/src/sqlite_adapter.ts";
+import { action } from "../packages/runtime/index.ts";
 
 async function createTestEngine(eventBus: ChimpbaseEventBus) {
   const platform = createDefaultChimpbasePlatformShim();
@@ -60,9 +61,9 @@ describe("event bus", () => {
 
     const { engine, registry } = await createTestEngine(new SpyEventBus());
 
-    registry.actions.set("emitEvent", async (ctx) => {
+    registry.actions.set("emitEvent", action("emitEvent", async (ctx) => {
       ctx.pubsub.publish("order.created", { orderId: "123" });
-    });
+    }));
 
     await engine.executeAction("emitEvent");
 

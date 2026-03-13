@@ -35,14 +35,20 @@ import {
   subscription as createSubscriptionEntry,
   workflow as createWorkflowEntry,
   worker as createWorkerEntry,
+  type ChimpbaseActionReference,
   type ChimpbaseActionHandler,
+  type ChimpbaseObjectActionHandler,
   type ChimpbaseCronHandler,
+  type ChimpbaseInferActionArgs,
+  type ChimpbaseInferActionResult,
   type ChimpbaseRegistration,
   type ChimpbaseRouteEnv,
   type ChimpbaseRouteHandler,
   type ChimpbaseSubscriptionHandler,
   type ChimpbaseSubscriptionOptions,
   type ChimpbaseTelemetryPersistOption,
+  type ChimpbaseTupleActionHandler,
+  type ChimpbaseValidator,
   type ChimpbaseWorkerDefinition,
   type ChimpbaseWorkerHandler,
   type ChimpbaseWorkflowContract,
@@ -193,8 +199,28 @@ export class ChimpbaseBunHost {
     return host;
   }
 
-  async executeAction(name: string, args: unknown[] = []): Promise<ActionExecutionResult> {
-    return await this.engine.executeAction(name, args);
+  async executeAction<TAction extends ChimpbaseActionReference<any, any, any>>(
+    reference: TAction,
+    ...args: ChimpbaseInferActionArgs<TAction> extends readonly unknown[]
+      ? ChimpbaseInferActionArgs<TAction>
+      : [ChimpbaseInferActionArgs<TAction>]
+  ): Promise<{ emittedEvents: unknown[]; result: ChimpbaseInferActionResult<TAction> }>;
+  async executeAction(name: string, args?: unknown[] | unknown): Promise<ActionExecutionResult>;
+  async executeAction(
+    nameOrReference: string | ChimpbaseActionReference<any, any, any>,
+    ...args: unknown[]
+  ): Promise<ActionExecutionResult> {
+    if (typeof nameOrReference === "string") {
+      return await this.engine.executeAction(
+        nameOrReference,
+        normalizeActionExecutionArgs(args[0]),
+      );
+    }
+
+    return await this.engine.executeAction(
+      nameOrReference.name,
+      normalizeReferenceInvocationArgs(nameOrReference, args),
+    );
   }
 
   async executeRoute(request: Request): Promise<RouteExecutionResult> {
@@ -227,10 +253,20 @@ export class ChimpbaseBunHost {
 
   action<TArgs extends unknown[] = unknown[], TResult = unknown>(
     name: string,
-    handler: ChimpbaseActionHandler<TArgs, TResult>,
+    handler: ChimpbaseTupleActionHandler<TArgs, TResult>,
+    options?: { telemetry?: ChimpbaseTelemetryPersistOption },
+  ): this;
+  action<TAction extends ChimpbaseActionReference<any, any, any>>(entry: TAction): this;
+  action(
+    nameOrEntry: string | ChimpbaseActionReference<any, any, any>,
+    handler?: ChimpbaseTupleActionHandler<any[], any>,
     options?: { telemetry?: ChimpbaseTelemetryPersistOption },
   ): this {
-    return this.register(createActionEntry(name, handler, options));
+    return this.register(
+      typeof nameOrEntry === "string"
+        ? createActionEntry(nameOrEntry, handler as ChimpbaseTupleActionHandler<any[], any>, options)
+        : nameOrEntry,
+    );
   }
 
   subscription<TPayload = unknown, TResult = unknown>(
@@ -267,9 +303,25 @@ export class ChimpbaseBunHost {
 
   registerAction<TArgs extends unknown[] = unknown[], TResult = unknown>(
     name: string,
-    handler: ChimpbaseActionHandler<TArgs, TResult>,
-  ): ChimpbaseActionHandler<TArgs, TResult> {
-    this.registry.actions.set(name, handler as ChimpbaseActionHandler);
+    handler: ChimpbaseTupleActionHandler<TArgs, TResult>,
+    definition?: { args?: undefined },
+  ): ChimpbaseTupleActionHandler<TArgs, TResult>;
+  registerAction<TArgs, TResult = unknown>(
+    name: string,
+    handler: ChimpbaseObjectActionHandler<TArgs, TResult>,
+    definition: { args: ChimpbaseValidator<TArgs> },
+  ): ChimpbaseObjectActionHandler<TArgs, TResult>;
+  registerAction(
+    name: string,
+    handler: ChimpbaseActionHandler<any, any>,
+    definition?: { args?: ChimpbaseValidator<any> },
+  ): ChimpbaseActionHandler<any, any> {
+    this.registry.actions.set(name, {
+      args: definition?.args,
+      handler: handler as ChimpbaseActionHandler<any, any>,
+      kind: "action",
+      name,
+    });
     return handler;
   }
 
@@ -674,6 +726,29 @@ function registerInternalCleanupCrons(
     );
     host.setTelemetryOverride("cron:__chimpbase.subscription.idempotency.cleanup", false);
   }
+}
+
+function normalizeActionExecutionArgs(args: unknown[] | unknown): unknown[] {
+  if (args === undefined) {
+    return [];
+  }
+
+  return Array.isArray(args) ? args : [args];
+}
+
+function normalizeReferenceInvocationArgs(
+  reference: ChimpbaseActionReference<any, any, any>,
+  args: unknown[],
+): unknown[] {
+  if (reference.args) {
+    if (args.length > 1) {
+      throw new Error(`action ${reference.name} expects a single argument`);
+    }
+
+    return args.length === 0 ? [] : [args[0]];
+  }
+
+  return args;
 }
 
 function parseDatabaseTimestampMs(value: unknown): number | null {

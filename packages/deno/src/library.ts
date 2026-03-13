@@ -123,7 +123,7 @@ export const createChimpbaseDeno = Object.assign(createChimpbaseDenoImpl, {
 
 export async function runChimpbaseAction(
   actionName: string,
-  args: unknown[] = [],
+  args: unknown[] | unknown = [],
   options: { projectDir?: string } = {},
 ): Promise<{ host: ChimpbaseDenoHost; outcome: ActionExecutionResult }> {
   const host = await loadChimpbaseProject(options.projectDir);
@@ -174,7 +174,7 @@ export async function startChimpbaseApp(
 export async function runChimpbaseAppAction(
   app: ChimpbaseAppDefinition,
   actionName: string,
-  args: unknown[] = [],
+  args: unknown[] | unknown = [],
   options: LoadChimpbaseAppOptions = {},
 ): Promise<{ host: ChimpbaseDenoHost; outcome: ActionExecutionResult }> {
   const host = await loadChimpbaseApp(app, options);
@@ -265,7 +265,7 @@ function normalizeCreateChimpbaseOptions(
   options: CreateChimpbaseOptions,
 ): CreateChimpbaseFromAppOptions {
   if ("app" in options && options.app !== undefined) {
-    return options;
+    return options as CreateChimpbaseFromAppOptions;
   }
 
   const {
@@ -277,7 +277,7 @@ function normalizeCreateChimpbaseOptions(
     worker,
     workflows,
     ...runtimeOptions
-  } = options;
+  } = options as CreateChimpbaseAppFieldsOptions;
 
   return {
     ...runtimeOptions,

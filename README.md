@@ -41,6 +41,7 @@ Bun:
 
 ```ts
 import { createChimpbase } from "@chimpbase/bun";
+import { action, subscription, v, worker } from "@chimpbase/runtime";
 
 const chimpbase = await createChimpbase({
   telemetry: {
@@ -49,8 +50,13 @@ const chimpbase = await createChimpbase({
   storage: { engine: "postgres", url: process.env.DATABASE_URL! },
 });
 
-chimpbase
-  .action("createCustomer", async (ctx, input) => {
+const createCustomer = action({
+  args: v.object({
+    email: v.string(),
+    name: v.string(),
+    plan: v.string(),
+  }),
+  async handler(ctx, input) {
     const [customer] = await ctx.query<{ id: number }>(
       "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id",
       [input.email, input.name, input.plan],
@@ -75,11 +81,16 @@ chimpbase
     });
 
     return customer;
-  })
-  .subscription("customer.created", async (ctx, event) => {
+  },
+  name: "createCustomer",
+});
+
+chimpbase.register(
+  createCustomer,
+  subscription("customer.created", async (ctx, event) => {
     await ctx.queue.enqueue("customer.sync", event);
-  }, { idempotent: true, name: "enqueueCustomerSync" })
-  .worker("customer.sync", async (ctx, event) => {
+  }, { idempotent: true, name: "enqueueCustomerSync" }),
+  worker("customer.sync", async (ctx, event) => {
     const apiKey = ctx.secret("CRM_API_KEY");
 
     ctx.log.info("syncing customer", { customerId: event.customerId });
@@ -92,7 +103,8 @@ chimpbase
     );
 
     return { apiKeyLoaded: Boolean(apiKey) };
-  });
+  }),
+);
 
 await chimpbase.start();
 ```
@@ -101,12 +113,20 @@ Deno CLI/self-hosted:
 
 ```ts
 import { createChimpbaseDeno } from "npm:@chimpbase/deno";
+import { action } from "npm:@chimpbase/runtime";
 
 const chimpbase = await createChimpbaseDeno({
   storage: { engine: "sqlite", path: "data/acme-deno.db" },
 });
 
-chimpbase.action("health", async () => ({ ok: true }));
+const health = action({
+  async handler() {
+    return { ok: true };
+  },
+  name: "health",
+});
+
+chimpbase.register(health);
 
 await chimpbase.start();
 ```
@@ -251,7 +271,36 @@ Telemetry can optionally be persisted into dedicated event streams for debugging
 
 ### `action`
 
-You can call another action from inside the runtime when you want to reuse a business operation without opening another transport path.
+Prefer validator-backed actions when the operation is called across HTTP, CLI, workflows or other actions:
+
+```ts
+import { action, v } from "@chimpbase/runtime";
+
+const createCustomer = action({
+  args: v.object({
+    email: v.string(),
+    name: v.string(),
+    plan: v.string(),
+  }),
+  async handler(ctx, input) {
+    return await ctx.query(
+      "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id, email, name, plan",
+      [input.email, input.name, input.plan],
+    );
+  },
+  name: "createCustomer",
+});
+
+await ctx.action(createCustomer, {
+  email: "alice@example.com",
+  name: "Alice",
+  plan: "pro",
+});
+```
+
+The action ref carries input and return types, while the runtime keeps the serializable action name for workflows, CLI execution and persistence.
+
+`action("name", handler)` still works for tuple-style internal handlers and compatibility with older code.
 
 ## Quick start
 
@@ -274,7 +323,7 @@ Run an action directly from the monorepo root:
 
 ```bash
 export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/chimpbase
-bun run --filter @chimpbase/example-todo-ts action -- seedDemoWorkspace '[]'
+bun run --filter @chimpbase/example-todo-ts action -- createProject '{"name":"Operations Platform","ownerEmail":"ops-lead@chimpbase.dev"}'
 ```
 
 If you want the intended experience, start with `examples/bun/todo-ts`, but install dependencies only once at the repository root.
@@ -323,9 +372,12 @@ const captureTodoBacklogSnapshot = async (ctx, invocation) => {
 
 chimpbase.register(
   cron("todo.backlog.snapshot", "*/15 * * * *", captureTodoBacklogSnapshot),
-  action("listTodoBacklogSnapshots", async (ctx) =>
-    await ctx.collection.find("todo_backlog_snapshots", {}, { limit: 50 }),
-  ),
+  action({
+    async handler(ctx) {
+      return await ctx.collection.find("todo_backlog_snapshots", {}, { limit: 50 });
+    },
+    name: "listTodoBacklogSnapshots",
+  }),
 );
 ```
 
@@ -379,10 +431,10 @@ Override the global setting on individual actions, workers, subscriptions or cro
 
 ```ts
 // Opt a noisy action out of telemetry persistence
-action("healthCheck", handler, { telemetry: false });
+action({ name: "healthCheck", handler, telemetry: false });
 
 // Opt a specific action in when global is off
-action("importantAction", handler, { telemetry: { log: true, metric: true } });
+action({ name: "importantAction", handler, telemetry: { log: true, metric: true } });
 
 // Only disable trace persistence for one worker
 worker("fastWorker", handler, undefined, { telemetry: { trace: false } });
@@ -424,8 +476,19 @@ Simple example:
 ```ts
 import {
   action,
+  v,
   workflow,
 } from "@chimpbase/runtime";
+
+const provisionCustomer = action({
+  args: v.object({
+    customerId: v.string(),
+  }),
+  async handler(_ctx, input) {
+    return { customerId: input.customerId, ok: true };
+  },
+  name: "provisionCustomer",
+});
 
 const onboarding = workflow({
   name: "customer.onboarding",
@@ -440,7 +503,7 @@ const onboarding = workflow({
   },
   async run(wf) {
     if (wf.state.phase === "provision") {
-      await wf.action("provisionCustomer", wf.state.customerId);
+      await wf.action(provisionCustomer, { customerId: wf.state.customerId });
       return wf.transition({
         ...wf.state,
         phase: "waiting_kickoff",
@@ -471,17 +534,30 @@ const onboarding = workflow({
 
 chimpbase.register(
   onboarding,
-  action("provisionCustomer", async (_ctx, customerId) => {
-    return { customerId, ok: true };
+  provisionCustomer,
+  action({
+    args: v.object({
+      customerId: v.string(),
+    }),
+    async handler(ctx, input) {
+      return await ctx.workflow.start("customer.onboarding", { customerId: input.customerId }, {
+        workflowId: `workflow:${input.customerId}`,
+      });
+    },
+    name: "startOnboarding",
   }),
-  action("startOnboarding", async (ctx, customerId) => {
-    return await ctx.workflow.start("customer.onboarding", { customerId }, {
-      workflowId: `workflow:${customerId}`,
-    });
-  }),
-  action("completeKickoff", async (ctx, customerId, completedAt) => {
-    await ctx.workflow.signal(`workflow:${customerId}`, "kickoff.completed", { completedAt });
-    return { ok: true };
+  action({
+    args: v.object({
+      completedAt: v.string(),
+      customerId: v.string(),
+    }),
+    async handler(ctx, input) {
+      await ctx.workflow.signal(`workflow:${input.customerId}`, "kickoff.completed", {
+        completedAt: input.completedAt,
+      });
+      return { ok: true };
+    },
+    name: "completeKickoff",
   }),
 );
 ```

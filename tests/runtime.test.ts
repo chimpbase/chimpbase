@@ -11,6 +11,7 @@ import {
 } from "../packages/core/index.ts";
 import { createChimpbase } from "../packages/bun/src/library.ts";
 import { ChimpbaseBunHost } from "../packages/bun/src/runtime.ts";
+import { action, v } from "../packages/runtime/index.ts";
 
 const runtimeRoot = resolve(import.meta.dir, "..");
 const exampleDir = resolve(runtimeRoot, "examples/bun/todo-ts");
@@ -178,6 +179,96 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("supports validator-backed action references", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-action-refs-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      app: defineChimpbaseApp({
+        project: { name: "action-refs" },
+      }),
+      projectDir,
+      storage: {
+        engine: "sqlite",
+        path: "data/action-refs.db",
+      },
+    });
+
+    const createAccount = action({
+      args: v.object({
+        email: v.string(),
+        name: v.string(),
+      }),
+      async handler(_ctx, input) {
+        return {
+          email: input.email,
+          name: input.name,
+          slug: input.name.toLowerCase(),
+        };
+      },
+      name: "createAccountRef",
+    });
+
+    const seedAccounts = action({
+      args: v.object({
+        accounts: v.array(
+          v.object({
+            email: v.string(),
+            name: v.string(),
+          }),
+        ),
+      }),
+      async handler(ctx, input) {
+        const created = [];
+        for (const account of input.accounts) {
+          created.push(await ctx.action(createAccount, account));
+        }
+
+        return {
+          created,
+          total: created.length,
+        };
+      },
+      name: "seedAccountsRef",
+    });
+
+    host.register(createAccount, seedAccounts);
+
+    try {
+      const seeded = await host.executeAction(seedAccounts, {
+        accounts: [
+          { email: "alice@test.dev", name: "Alice" },
+          { email: "bruno@test.dev", name: "Bruno" },
+        ],
+      });
+
+      expect(seeded.result).toEqual({
+        created: [
+          { email: "alice@test.dev", name: "Alice", slug: "alice" },
+          { email: "bruno@test.dev", name: "Bruno", slug: "bruno" },
+        ],
+        total: 2,
+      });
+
+      const seededByName = await host.executeAction("seedAccountsRef", {
+        accounts: [{ email: "carol@test.dev", name: "Carol" }],
+      });
+      expect(seededByName.result).toEqual({
+        created: [{ email: "carol@test.dev", name: "Carol", slug: "carol" }],
+        total: 1,
+      });
+
+      await expect(
+        host.executeAction(createAccount, {
+          email: 42,
+          name: "Broken",
+        } as never),
+      ).rejects.toThrow("args.email must be a string");
+    } finally {
+      host.close();
+    }
+  });
+
   test("accepts typed TS migrations in createChimpbase options", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-typed-migrations-"));
     cleanupDirs.push(projectDir);
@@ -258,17 +349,13 @@ describe("chimpbase-bun runtime", () => {
           kind: "subscription",
         },
         {
-          handler: async (ctx, value) => {
+          ...action("enqueueAudit", async (ctx, value) => {
             ctx.pubsub.publish("audit.created", { value });
             return { queued: value };
-          },
-          kind: "action",
-          name: "enqueueAudit",
+          }),
         },
         {
-          handler: async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
-          kind: "action",
-          name: "listAudit",
+          ...action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),
         },
         {
           definition: undefined,
@@ -573,8 +660,8 @@ describe("chimpbase-bun runtime", () => {
       ]);
 
       const todoId = (createdTodo.result as { id: number }).id;
-      await host.executeAction("startTodo", [todoId]);
-      await host.executeAction("completeTodo", [todoId]);
+      await host.executeAction("startTodo", { todoId });
+      await host.executeAction("completeTodo", { todoId });
       const queueResult = await host.processNextQueueJob();
 
       expect(queueResult?.queueName).toBe("todo.completed.notify");
@@ -1250,10 +1337,10 @@ describe("chimpbase-bun runtime", () => {
     const host = await ChimpbaseBunHost.load(projectDir);
 
     await host.executeAction("seedDemoWorkspace");
-    const preference = await host.executeAction("setWorkspacePreference", [
-      "timezone",
-      { label: "America/Sao_Paulo" },
-    ]);
+    const preference = await host.executeAction("setWorkspacePreference", {
+      key: "timezone",
+      value: { label: "America/Sao_Paulo" },
+    });
     expect(preference.result).toEqual({
       key: "workspace.timezone",
       value: { label: "America/Sao_Paulo" },
@@ -1279,7 +1366,7 @@ describe("chimpbase-bun runtime", () => {
     ]);
     expect((note.result as { id: string }).id).toBeString();
 
-    const notes = await host.executeAction("listTodoNotes", [todoId]);
+    const notes = await host.executeAction("listTodoNotes", { todoId });
     expect(notes.result).toEqual([
       expect.objectContaining({
         body: "Remember to validate collection storage.",
@@ -1287,8 +1374,8 @@ describe("chimpbase-bun runtime", () => {
       }),
     ]);
 
-    await host.executeAction("startTodo", [todoId]);
-    await host.executeAction("completeTodo", [todoId]);
+    await host.executeAction("startTodo", { todoId });
+    await host.executeAction("completeTodo", { todoId });
     await host.processNextQueueJob();
 
     const preferences = await host.executeAction("listWorkspacePreferences");
@@ -1299,7 +1386,7 @@ describe("chimpbase-bun runtime", () => {
       },
     ]);
 
-    const activity = await host.executeAction("listTodoActivityStream", []);
+    const activity = await host.executeAction("listTodoActivityStream", {});
     expect((activity.result as Array<{ event: string }>).some((entry) => entry.event === "todo.completed")).toBe(true);
 
     host.close();

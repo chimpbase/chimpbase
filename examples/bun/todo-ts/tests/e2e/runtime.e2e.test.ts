@@ -51,9 +51,10 @@ test("executes modular seed and query actions through the CLI", async () => {
 
     const env: ChimpbaseRouteEnv = {
       async action<TArgs extends unknown[] = unknown[], TResult = unknown>(
-        name: string,
+        nameOrReference: string | { name: string },
         ...args: TArgs
       ): Promise<TResult> {
+        const name = typeof nameOrReference === "string" ? nameOrReference : nameOrReference.name;
         calls.push({ name, args });
 
         const result = (() => {

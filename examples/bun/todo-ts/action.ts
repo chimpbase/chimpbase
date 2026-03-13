@@ -7,7 +7,7 @@ if (!actionName) {
   throw new Error("missing action name");
 }
 
-const args = rawArgs ? JSON.parse(rawArgs) as unknown[] : [];
+const args = rawArgs ? JSON.parse(rawArgs) as unknown : [];
 const { chimpbase } = await createTodoApplication();
 const outcome = await chimpbase.executeAction(actionName, args);
 

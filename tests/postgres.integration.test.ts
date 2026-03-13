@@ -69,7 +69,7 @@ if (!dockerAvailable) {
       try {
         await host.executeAction("seedDemoWorkspace");
 
-        const dashboard = await host.executeAction("getTodoDashboard", [null]);
+        const dashboard = await host.executeAction("getTodoDashboard", {});
         expect(dashboard.result).toEqual(
           expect.objectContaining({
             backlog: expect.any(Number),
@@ -96,8 +96,8 @@ if (!dockerAvailable) {
         const createdTodo = await createResponse.response?.json() as { id: number; title: string };
         expect(createdTodo.id).toBeNumber();
 
-        await host.executeAction("startTodo", [createdTodo.id]);
-        await host.executeAction("completeTodo", [createdTodo.id]);
+        await host.executeAction("startTodo", { todoId: createdTodo.id });
+        await host.executeAction("completeTodo", { todoId: createdTodo.id });
 
         const queueResult = await host.processNextQueueJob();
         expect(queueResult?.queueName).toBe("todo.completed.notify");
@@ -111,10 +111,10 @@ if (!dockerAvailable) {
           }),
         ]);
 
-        const preference = await host.executeAction("setWorkspacePreference", [
-          "timezone",
-          { label: "UTC" },
-        ]);
+        const preference = await host.executeAction("setWorkspacePreference", {
+          key: "timezone",
+          value: { label: "UTC" },
+        });
         expect(preference.result).toEqual({
           key: "workspace.timezone",
           value: { label: "UTC" },
@@ -128,7 +128,7 @@ if (!dockerAvailable) {
         ]);
         expect((note.result as { id: string }).id).toBeString();
 
-        const notes = await host.executeAction("listTodoNotes", [createdTodo.id]);
+        const notes = await host.executeAction("listTodoNotes", { todoId: createdTodo.id });
         expect(notes.result).toEqual([
           expect.objectContaining({
             body: "Persisted through Postgres collection storage.",
@@ -136,7 +136,7 @@ if (!dockerAvailable) {
           }),
         ]);
 
-        const activity = await host.executeAction("listTodoActivityStream");
+        const activity = await host.executeAction("listTodoActivityStream", {});
         expect((activity.result as Array<{ event: string }>).some((entry) => entry.event === "todo.completed")).toBe(true);
       } finally {
         host.close();

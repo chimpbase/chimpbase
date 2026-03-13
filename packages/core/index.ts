@@ -1,5 +1,9 @@
 import type {
   ChimpbaseActionHandler,
+  ChimpbaseObjectActionHandler,
+  ChimpbaseActionRegistration,
+  ChimpbaseTupleActionHandler,
+  ChimpbaseValidator,
   ChimpbaseCronHandler,
   ChimpbaseRegistration,
   ChimpbaseRouteHandler,
@@ -168,7 +172,7 @@ export interface ChimpbaseSubscriptionEntry {
 }
 
 export interface ChimpbaseRegistry {
-  actions: Map<string, ChimpbaseActionHandler>;
+  actions: Map<string, ChimpbaseActionRegistration<any, any, any>>;
   crons: Map<string, ChimpbaseCronRegistration>;
   httpHandler: ChimpbaseRouteHandler | null;
   subscriptions: Map<string, ChimpbaseSubscriptionEntry[]>;
@@ -180,8 +184,14 @@ export interface ChimpbaseRegistry {
 export interface ChimpbaseEntrypointTarget {
   registerAction<TArgs extends unknown[] = unknown[], TResult = unknown>(
     name: string,
-    handler: ChimpbaseActionHandler<TArgs, TResult>,
-  ): ChimpbaseActionHandler<TArgs, TResult>;
+    handler: ChimpbaseTupleActionHandler<TArgs, TResult>,
+    definition?: { args?: undefined },
+  ): ChimpbaseTupleActionHandler<TArgs, TResult>;
+  registerAction<TArgs, TResult = unknown>(
+    name: string,
+    handler: ChimpbaseObjectActionHandler<TArgs, TResult>,
+    definition: { args: ChimpbaseValidator<TArgs> },
+  ): ChimpbaseObjectActionHandler<TArgs, TResult>;
   registerSubscription<TPayload = unknown, TResult = unknown>(
     eventName: string,
     handler: ChimpbaseSubscriptionHandler<TPayload, TResult>,
