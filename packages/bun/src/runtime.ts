@@ -109,6 +109,7 @@ export type DrainResult = ChimpbaseDrainResult;
 export interface CreateHostOptions {
   app?: ChimpbaseAppDefinition;
   config: ChimpbaseProjectConfig;
+  debug?: boolean;
   migrations?: ChimpbaseMigrationsDefinition;
   migrationSource?: ChimpbaseMigrationSource;
   migrationsDir?: string | null;
@@ -128,6 +129,7 @@ export class ChimpbaseBunHost {
   readonly registry: ChimpbaseRegistry;
   private cronRegistryDirty = true;
   private cronSyncPromise: Promise<void> | null = null;
+  private readonly debugEnabled: boolean;
   private serializedEngineOperations: Promise<void> = Promise.resolve();
   private readonly storage: StorageHandle;
 
@@ -135,6 +137,7 @@ export class ChimpbaseBunHost {
     projectDir: string,
     config: ChimpbaseProjectConfig,
     platform: ChimpbasePlatformShim,
+    debugEnabled: boolean,
     storage: StorageHandle,
     engine: ChimpbaseEngine,
     registry: ChimpbaseRegistry,
@@ -142,6 +145,7 @@ export class ChimpbaseBunHost {
     this.projectDir = projectDir;
     this.config = config;
     this.platform = platform;
+    this.debugEnabled = debugEnabled;
     this.storage = storage;
     this.engine = engine;
     this.registry = registry;
@@ -190,7 +194,15 @@ export class ChimpbaseBunHost {
       },
       worker: options.config.worker,
     });
-    const host = new ChimpbaseBunHost(projectDir, options.config, platform, storage, engine, registry);
+    const host = new ChimpbaseBunHost(
+      projectDir,
+      options.config,
+      platform,
+      options.debug ?? false,
+      storage,
+      engine,
+      registry,
+    );
 
     if (options.app) {
       applyChimpbaseApp(host, options.app);
@@ -212,39 +224,87 @@ export class ChimpbaseBunHost {
     nameOrReference: string | ChimpbaseActionReference<any, any, any>,
     ...args: unknown[]
   ): Promise<ActionExecutionResult> {
-    if (typeof nameOrReference === "string") {
-      return await this.runEngineOperation(async () => await this.engine.executeAction(
+    const actionName = typeof nameOrReference === "string" ? nameOrReference : nameOrReference.name;
+    this.debug("action executing", { name: actionName });
+
+    try {
+      const outcome = typeof nameOrReference === "string"
+        ? await this.runEngineOperation(async () => await this.engine.executeAction(
         nameOrReference,
         normalizeActionExecutionArgs(args[0]),
-      ));
-    }
+      ))
+        : await this.runEngineOperation(async () => await this.engine.executeAction(
+          nameOrReference.name,
+          normalizeReferenceInvocationArgs(nameOrReference, args),
+        ));
 
-    return await this.runEngineOperation(async () => await this.engine.executeAction(
-      nameOrReference.name,
-      normalizeReferenceInvocationArgs(nameOrReference, args),
-    ));
+      this.debug("action completed", { emittedEvents: outcome.emittedEvents.length, name: actionName });
+      return outcome;
+    } catch (error) {
+      this.debug("action failed", { error: formatError(error), name: actionName });
+      throw error;
+    }
   }
 
   async executeRoute(request: Request): Promise<RouteExecutionResult> {
-    return await this.runEngineOperation(async () => await this.engine.executeRoute(request));
+    const route = getRouteKey(request);
+    this.debug("route executing", { route });
+
+    try {
+      const outcome = await this.runEngineOperation(async () => await this.engine.executeRoute(request));
+      this.debug("route completed", {
+        emittedEvents: outcome.emittedEvents.length,
+        route,
+        status: outcome.response?.status ?? 404,
+      });
+      return outcome;
+    } catch (error) {
+      this.debug("route failed", { error: formatError(error), route });
+      throw error;
+    }
   }
 
   async processNextQueueJob(): Promise<QueueExecutionResult | null> {
-    return await this.runEngineOperation(async () => await this.engine.processNextQueueJob());
+    const outcome = await this.runEngineOperation(async () => await this.engine.processNextQueueJob());
+    if (outcome) {
+      this.debug("queue job processed", {
+        emittedEvents: outcome.emittedEvents.length,
+        jobId: outcome.jobId,
+        queueName: outcome.queueName,
+      });
+    }
+
+    return outcome;
   }
 
   async processNextCronSchedule(): Promise<CronScheduleExecutionResult | null> {
-    return await this.runEngineOperation(async () => {
+    const outcome = await this.runEngineOperation(async () => {
       await this.syncCronSchedulesIfNeeded();
       return await this.engine.processNextCronSchedule();
     });
+    if (outcome) {
+      this.debug("cron schedule processed", {
+        fireAtMs: outcome.fireAtMs,
+        nextFireAtMs: outcome.nextFireAtMs,
+        scheduleName: outcome.scheduleName,
+      });
+    }
+
+    return outcome;
   }
 
   async drain(options: DrainOptions = {}): Promise<DrainResult> {
-    return await this.runEngineOperation(async () => {
+    const outcome = await this.runEngineOperation(async () => {
       await this.syncCronSchedulesIfNeeded();
       return await this.engine.drain(options);
     });
+    this.debug("worker drain completed", {
+      cronSchedules: outcome.cronSchedules,
+      queueJobs: outcome.queueJobs,
+      runs: outcome.runs,
+      stopReason: outcome.stopReason,
+    });
+    return outcome;
   }
 
   register(...entriesOrGroups: Array<ChimpbaseRegistration | readonly ChimpbaseRegistration[]>): this {
@@ -472,6 +532,12 @@ export class ChimpbaseBunHost {
     const runWorker = options.runWorker ?? !options.serve;
     const worker = runWorker ? this.startWorker() : null;
     const server = runServe ? this.serve() : null;
+    this.debug("runtime starting", {
+      port: runServe ? this.config.server.port : null,
+      runServe,
+      runWorker,
+      storage: this.config.storage.engine,
+    });
     this.engine.startEventBus();
 
     return {
@@ -481,6 +547,7 @@ export class ChimpbaseBunHost {
         server?.stop(true);
         worker?.stop();
         this.host.engine.stopEventBus();
+        this.host.debug("runtime stopped");
       },
     };
   }
@@ -528,6 +595,7 @@ export class ChimpbaseBunHost {
 
   close(): void {
     this.engine.stopEventBus();
+    this.debug("runtime closed");
     void this.storage.close();
   }
 
@@ -538,6 +606,19 @@ export class ChimpbaseBunHost {
 
     this.serializedEngineOperations = queued.then(() => undefined, () => undefined);
     return await queued;
+  }
+
+  private debug(message: string, details?: Record<string, unknown>): void {
+    if (!this.debugEnabled) {
+      return;
+    }
+
+    if (details && Object.keys(details).length > 0) {
+      console.debug("[@chimpbase/bun][debug]", message, details);
+      return;
+    }
+
+    console.debug("[@chimpbase/bun][debug]", message);
   }
 
   private async syncCronSchedulesIfNeeded(): Promise<void> {
@@ -767,6 +848,10 @@ function normalizeActionExecutionArgs(args: unknown[] | unknown): unknown[] {
   }
 
   return Array.isArray(args) ? args : [args];
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function normalizeReferenceInvocationArgs(

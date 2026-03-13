@@ -32,6 +32,7 @@ export interface StartedChimpbaseProject {
 }
 
 interface CreateChimpbaseRuntimeOptions {
+  debug?: boolean;
   migrationsDir?: string;
   migrationsSql?: string[];
   projectDir?: string;
@@ -252,6 +253,7 @@ async function createChimpbaseDenoFromApp(
   const host = await ChimpbaseDenoHost.create({
     app: options.app,
     config,
+    debug: inferDebugEnabled(options.debug),
     migrationsDir: inferMigrationsDir(projectDir, options.migrationsDir ?? getDenoEnv("CHIMPBASE_MIGRATIONS_DIR"), options),
     migrationsSql: options.migrationsSql,
     projectDir,
@@ -328,6 +330,25 @@ function inferNumberEnv(name: string): number | undefined {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function inferDebugEnabled(explicit?: boolean): boolean {
+  if (explicit !== undefined) {
+    return explicit;
+  }
+
+  return isTruthyEnv(getDenoEnv("CHIMPBASE_DEBUG"));
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  return value === "1"
+    || value === "true"
+    || value === "yes"
+    || value === "on";
 }
 
 function inferMigrationsDir(

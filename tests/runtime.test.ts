@@ -285,6 +285,48 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("emits runtime debug logs when enabled", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-debug-logs-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      app: defineChimpbaseApp({
+        project: { name: "debug-logs" },
+      }),
+      debug: true,
+      projectDir,
+      storage: {
+        engine: "memory",
+      },
+    });
+
+    host.registerAction("health", async () => ({ ok: true }));
+
+    const originalConsoleDebug = console.debug;
+    const debugCalls: unknown[][] = [];
+    console.debug = (...args: unknown[]) => {
+      debugCalls.push(args);
+    };
+
+    const started = host.start({ runWorker: false, serve: false });
+
+    try {
+      await host.executeAction("health");
+      await started.stop();
+      expect(debugCalls.some((call) => call[0] === "[@chimpbase/bun][debug]" && call[1] === "runtime starting")).toBe(true);
+      expect(debugCalls.some((call) => call[0] === "[@chimpbase/bun][debug]" && call[1] === "action executing")).toBe(true);
+      expect(debugCalls.some(
+        (call) => call[0] === "[@chimpbase/bun][debug]"
+          && call[1] === "action completed"
+          && (call[2] as { name?: string })?.name === "health",
+      )).toBe(true);
+      expect(debugCalls.some((call) => call[0] === "[@chimpbase/bun][debug]" && call[1] === "runtime stopped")).toBe(true);
+    } finally {
+      host.close();
+      console.debug = originalConsoleDebug;
+    }
+  });
+
   test("allows calling registered action refs while the sqlite worker loop is active", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-direct-action-worker-"));
     cleanupDirs.push(projectDir);
