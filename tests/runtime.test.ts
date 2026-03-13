@@ -611,6 +611,77 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("drain alternates between due cron schedules and queue jobs", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-drain-fairness-"));
+    cleanupDirs.push(projectDir);
+
+    let now = Date.UTC(2026, 2, 11, 11, 0, 0);
+    const host = await ChimpbaseBunHost.create({
+      config: normalizeProjectConfig({
+        project: { name: "drain-fairness" },
+        storage: {
+          engine: "sqlite",
+          path: "data/drain-fairness.db",
+        },
+        worker: {
+          retryDelayMs: 0,
+        },
+      }),
+      platform: {
+        hashString(input) {
+          return `hash:${input}`;
+        },
+        now() {
+          return now;
+        },
+        randomUUID() {
+          return crypto.randomUUID();
+        },
+      },
+      projectDir,
+      secrets: {
+        get() {
+          return null;
+        },
+      },
+    });
+
+    host.registerAction("enqueueJob", async (ctx) => {
+      await ctx.queue.enqueue("batch.job", { value: "job-1" });
+      return null;
+    });
+    host.registerAction(
+      "listCronSchedules",
+      async (ctx) =>
+        await ctx.query<{ next_fire_at_ms: number }>(
+          "SELECT next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC",
+        ),
+    );
+    host.registerWorker("batch.job", async () => {});
+    host.registerCron("alpha.rollup", "*/5 * * * *", async () => null);
+    host.registerCron("beta.rollup", "*/5 * * * *", async () => null);
+
+    try {
+      await host.syncCronSchedules();
+      const schedules = await host.executeAction("listCronSchedules");
+      const [{ next_fire_at_ms: dueAtMs }] = schedules.result as Array<{ next_fire_at_ms: number }>;
+      now = dueAtMs;
+
+      await host.executeAction("enqueueJob");
+
+      const drained = await host.drain({ maxRuns: 2 });
+      expect(drained).toEqual({
+        cronSchedules: 1,
+        idle: false,
+        queueJobs: 1,
+        runs: 2,
+        stopReason: "max_runs",
+      });
+    } finally {
+      host.close();
+    }
+  });
+
   test("preloads secrets from mounted files before env vars and .env", async () => {
     const previousToken = process.env.APP_TOKEN;
     const previousSecretsDir = process.env.CHIMPBASE_SECRETS_DIR;

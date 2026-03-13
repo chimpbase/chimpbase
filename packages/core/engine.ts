@@ -481,6 +481,7 @@ export class ChimpbaseEngine {
     const maxDurationMs = normalizeDrainMaxDuration(options.maxDurationMs);
     const maxRuns = normalizeDrainMaxRuns(options.maxRuns);
     let cronSchedules = 0;
+    let nextPriority: "cron" | "queue" = "cron";
     let queueJobs = 0;
 
     while (cronSchedules + queueJobs < maxRuns) {
@@ -494,13 +495,11 @@ export class ChimpbaseEngine {
         };
       }
 
-      const scheduled = await this.processNextCronSchedule();
-      if (scheduled) {
-        cronSchedules += 1;
-        continue;
-      }
+      const outcomes: Awaited<ReturnType<typeof this.drainInPriorityOrder>> = nextPriority === "cron"
+        ? await this.drainInPriorityOrder(["cron", "queue"], startedAtMs, maxDurationMs)
+        : await this.drainInPriorityOrder(["queue", "cron"], startedAtMs, maxDurationMs);
 
-      if (this.platform.now() - startedAtMs >= maxDurationMs) {
+      if (outcomes.stopReason === "max_duration") {
         return {
           cronSchedules,
           idle: false,
@@ -510,9 +509,10 @@ export class ChimpbaseEngine {
         };
       }
 
-      const job = await this.processNextQueueJob();
-      if (job) {
-        queueJobs += 1;
+      if (outcomes.cronSchedules > 0 || outcomes.queueJobs > 0) {
+        cronSchedules += outcomes.cronSchedules;
+        queueJobs += outcomes.queueJobs;
+        nextPriority = outcomes.cronSchedules > 0 ? "queue" : "cron";
         continue;
       }
 
@@ -532,6 +532,33 @@ export class ChimpbaseEngine {
       runs: cronSchedules + queueJobs,
       stopReason: "max_runs",
     };
+  }
+
+  private async drainInPriorityOrder(
+    priorities: readonly ["cron", "queue"] | readonly ["queue", "cron"],
+    startedAtMs: number,
+    maxDurationMs: number,
+  ): Promise<{ cronSchedules: number; queueJobs: number; stopReason?: "max_duration" }> {
+    for (const priority of priorities) {
+      if (this.platform.now() - startedAtMs >= maxDurationMs) {
+        return { cronSchedules: 0, queueJobs: 0, stopReason: "max_duration" };
+      }
+
+      if (priority === "cron") {
+        const scheduled = await this.processNextCronSchedule();
+        if (scheduled) {
+          return { cronSchedules: 1, queueJobs: 0 };
+        }
+        continue;
+      }
+
+      const job = await this.processNextQueueJob();
+      if (job) {
+        return { cronSchedules: 0, queueJobs: 1 };
+      }
+    }
+
+    return { cronSchedules: 0, queueJobs: 0 };
   }
 
   drainTelemetryRecords(): ChimpbaseTelemetryRecord[] {
