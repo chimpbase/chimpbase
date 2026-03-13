@@ -5,9 +5,11 @@
   "packageManager": "bun@1.3.10",
   "workspaces": [
     "packages/*",
+    "examples/*",
     "examples/bun/*"
   ],
   "scripts": {
+    "load-test": "bun run examples/load-test/cli.ts",
     "ci:check": "bun run typecheck && bun test && bun run publish:dry-run",
     "dev:todo-ts": "bun run --filter @chimpbase/example-todo-ts dev",
     "dev:todo-ts-decorators": "bun run --filter @chimpbase/example-todo-ts-decorators dev",

@@ -38,6 +38,7 @@
         "@chimpbase/bun": "workspace:*",
         "@chimpbase/core": "workspace:*",
         "@chimpbase/runtime": "workspace:*",
+        "@chimpbase/tooling": "workspace:*",
         "hono": "^4.12.5",
       },
     },
@@ -78,17 +79,26 @@
         "tslib": "^2.8.1",
       },
     },
+    "examples/load-test": {
+      "name": "@chimpbase/example-load-test",
+      "dependencies": {
+        "@chimpbase/bun": "workspace:*",
+        "@chimpbase/core": "workspace:*",
+        "@chimpbase/runtime": "workspace:*",
+        "@chimpbase/tooling": "workspace:*",
+      },
+    },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.1.6",
+      "version": "0.1.19",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
       "dependencies": {
-        "@chimpbase/core": "workspace:^",
-        "@chimpbase/postgres": "workspace:^",
-        "@chimpbase/runtime": "workspace:^",
-        "@chimpbase/tooling": "workspace:^",
+        "@chimpbase/core": "0.1.19",
+        "@chimpbase/postgres": "0.1.19",
+        "@chimpbase/runtime": "0.1.19",
+        "@chimpbase/tooling": "0.1.19",
         "kysely": "^0.28.11",
       },
       "devDependencies": {
@@ -99,15 +109,15 @@
     },
     "packages/core": {
       "name": "@chimpbase/core",
-      "version": "0.1.6",
+      "version": "0.1.19",
       "dependencies": {
-        "@chimpbase/runtime": "workspace:^",
+        "@chimpbase/runtime": "0.1.19",
         "kysely": "^0.28.11",
       },
     },
     "packages/deno": {
       "name": "@chimpbase/deno",
-      "version": "0.1.6",
+      "version": "0.1.19",
       "dependencies": {
         "@chimpbase/core": "workspace:^",
         "@chimpbase/postgres": "workspace:^",
@@ -121,10 +131,10 @@
     },
     "packages/postgres": {
       "name": "@chimpbase/postgres",
-      "version": "0.1.6",
+      "version": "0.1.19",
       "dependencies": {
-        "@chimpbase/core": "workspace:^",
-        "@chimpbase/runtime": "workspace:^",
+        "@chimpbase/core": "0.1.19",
+        "@chimpbase/runtime": "0.1.19",
         "kysely": "^0.28.11",
         "pg": "^8.16.3",
       },
@@ -135,17 +145,17 @@
     },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.1.6",
+      "version": "0.1.19",
       "dependencies": {
         "kysely": "^0.28.11",
       },
     },
     "packages/tooling": {
       "name": "@chimpbase/tooling",
-      "version": "0.1.6",
+      "version": "0.1.19",
       "dependencies": {
-        "@chimpbase/core": "workspace:^",
-        "@chimpbase/runtime": "workspace:^",
+        "@chimpbase/core": "0.1.19",
+        "@chimpbase/runtime": "0.1.19",
         "kysely": "^0.28.11",
         "pg": "^8.16.3",
       },
@@ -159,6 +169,8 @@
     "@chimpbase/core": ["@chimpbase/core@workspace:packages/core"],
 
     "@chimpbase/deno": ["@chimpbase/deno@workspace:packages/deno"],
+
+    "@chimpbase/example-load-test": ["@chimpbase/example-load-test@workspace:examples/load-test"],
 
     "@chimpbase/example-todo-ts": ["@chimpbase/example-todo-ts@workspace:examples/bun/todo-ts"],
 
