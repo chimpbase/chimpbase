@@ -39,6 +39,9 @@ describe("@chimpbase/tooling", () => {
         'engine = "postgres"',
         'url = "postgres://example.test/chimpbase"',
         "",
+        "[subscriptions]",
+        'dispatch = "async"',
+        "",
         "[subscriptions.idempotency.retention]",
         "enabled = true",
         "max_age_days = 21",
@@ -83,6 +86,7 @@ describe("@chimpbase/tooling", () => {
       url: "postgres://example.test/chimpbase",
     });
     expect(config.subscriptions).toEqual({
+      dispatch: "async",
       idempotency: {
         retention: {
           enabled: true,
@@ -132,6 +136,7 @@ describe("@chimpbase/tooling", () => {
         server: { port: 3000 },
         storage: { engine: "memory", path: null, url: null },
         subscriptions: {
+          dispatch: "sync",
           idempotency: {
             retention: { enabled: false, maxAgeDays: 30, schedule: "0 2 * * *" },
           },

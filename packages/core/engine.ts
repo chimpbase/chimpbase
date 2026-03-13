@@ -156,9 +156,17 @@ interface CronQueuePayload {
   scheduleName: string;
 }
 
+interface SubscriptionQueuePayload {
+  eventId?: number;
+  eventName: string;
+  payload: unknown;
+  payloadJson: string;
+}
+
 type WorkflowRunDirective = ChimpbaseWorkflowRunResult<any, any>;
 
 const INTERNAL_CRON_QUEUE_NAME = "__chimpbase.cron.run";
+const INTERNAL_SUBSCRIPTION_QUEUE_NAME = "__chimpbase.subscription.run";
 const INTERNAL_WORKFLOW_QUEUE_NAME = "__chimpbase.workflow.run";
 
 const TELEMETRY_LOG_STREAM = "_chimpbase.logs";
@@ -240,6 +248,9 @@ export interface ChimpbaseEngineOptions {
   platform?: ChimpbasePlatformShim;
   registry: ChimpbaseRegistry;
   secrets: ChimpbaseSecretsSource;
+  subscriptions: {
+    dispatch: "async" | "sync";
+  };
   telemetry: {
     minLevel: "debug" | "info" | "warn" | "error";
     persist: { log: boolean; metric: boolean; trace: boolean };
@@ -259,6 +270,7 @@ export class ChimpbaseEngine {
   private readonly platform: ChimpbasePlatformShim;
   private readonly registry: ChimpbaseRegistry;
   private readonly secrets: ChimpbaseEngineOptions["secrets"];
+  private readonly subscriptionsConfig: ChimpbaseEngineOptions["subscriptions"];
   private readonly telemetryConfig: ChimpbaseEngineOptions["telemetry"];
   private readonly telemetryRecords: ChimpbaseTelemetryRecord[] = [];
   private transactionDepth = 0;
@@ -270,6 +282,7 @@ export class ChimpbaseEngine {
     this.platform = options.platform ?? createDefaultChimpbasePlatformShim();
     this.registry = options.registry;
     this.secrets = options.secrets;
+    this.subscriptionsConfig = options.subscriptions;
     this.telemetryConfig = options.telemetry;
     this.worker = options.worker;
 
@@ -284,6 +297,26 @@ export class ChimpbaseEngine {
         await this.processCronQueuePayload(message);
       },
       name: INTERNAL_CRON_QUEUE_NAME,
+    });
+
+    if (this.registry.workers.has(INTERNAL_SUBSCRIPTION_QUEUE_NAME)) {
+      throw new Error(`reserved queue name already registered: ${INTERNAL_SUBSCRIPTION_QUEUE_NAME}`);
+    }
+
+    this.registry.workers.set(INTERNAL_SUBSCRIPTION_QUEUE_NAME, {
+      definition: { dlq: false },
+      handler: async (_ctx, payload) => {
+        const message = payload as SubscriptionQueuePayload;
+        await this.dispatchSubscriptions([
+          {
+            id: message.eventId,
+            name: message.eventName,
+            payload: message.payload,
+            payloadJson: message.payloadJson,
+          },
+        ]);
+      },
+      name: INTERNAL_SUBSCRIPTION_QUEUE_NAME,
     });
 
     if (this.registry.workers.has(INTERNAL_WORKFLOW_QUEUE_NAME)) {
@@ -302,7 +335,11 @@ export class ChimpbaseEngine {
 
   startEventBus(): void {
     this.eventBus.start(async (events, ack) => {
-      await this.dispatchSubscriptions(events);
+      if (this.subscriptionsConfig.dispatch === "async") {
+        await this.enqueueSubscriptionDispatchJobs(events);
+      } else {
+        await this.dispatchSubscriptions(events);
+      }
       await ack?.();
     });
   }
@@ -315,9 +352,7 @@ export class ChimpbaseEngine {
     const telemetryStart = this.telemetryRecords.length;
     const result = await this.invokeActionByName(name, args);
     const emittedEvents = this.takeCommittedEvents();
-    await this.dispatchSubscriptions(emittedEvents);
-    const allEmittedEvents = this.takeCommittedEvents();
-    await this.flushTelemetryToStreams({ kind: "action", name }, telemetryStart);
+    const allEmittedEvents = await this.handleCommittedEvents(emittedEvents, { kind: "action", name }, telemetryStart);
 
     return {
       emittedEvents: [...emittedEvents, ...allEmittedEvents],
@@ -333,9 +368,7 @@ export class ChimpbaseEngine {
       : null;
 
     const emittedEvents = this.takeCommittedEvents();
-    await this.dispatchSubscriptions(emittedEvents);
-    const allEmittedEvents = this.takeCommittedEvents();
-    await this.flushTelemetryToStreams(undefined, telemetryStart);
+    const allEmittedEvents = await this.handleCommittedEvents(emittedEvents, undefined, telemetryStart);
 
     return {
       emittedEvents: [...emittedEvents, ...allEmittedEvents],
@@ -457,10 +490,12 @@ export class ChimpbaseEngine {
       });
 
       const emittedEvents = this.takeCommittedEvents();
-      await this.dispatchSubscriptions(emittedEvents);
-      const allEmittedEvents = this.takeCommittedEvents();
+      const allEmittedEvents = await this.handleCommittedEvents(
+        emittedEvents,
+        { kind: "queue", name: job.queue_name },
+        telemetryStart,
+      );
       const combinedEvents = [...emittedEvents, ...allEmittedEvents];
-      await this.flushTelemetryToStreams({ kind: "queue", name: job.queue_name }, telemetryStart);
 
       await this.adapter.completeQueueJob(job.id);
 
@@ -1784,6 +1819,38 @@ export class ChimpbaseEngine {
         });
       }
     }
+  }
+
+  private async enqueueSubscriptionDispatchJobs(events: ChimpbaseEventRecord[]): Promise<void> {
+    for (const event of events) {
+      if ((this.registry.subscriptions.get(event.name) ?? []).length === 0) {
+        continue;
+      }
+
+      await this.adapter.queueEnqueue(INTERNAL_SUBSCRIPTION_QUEUE_NAME, {
+        eventId: event.id,
+        eventName: event.name,
+        payload: event.payload,
+        payloadJson: event.payloadJson,
+      } satisfies SubscriptionQueuePayload);
+    }
+  }
+
+  private async handleCommittedEvents(
+    emittedEvents: ChimpbaseEventRecord[],
+    scope: ChimpbaseExecutionScope | undefined,
+    telemetryStart: number,
+  ): Promise<ChimpbaseEventRecord[]> {
+    if (this.subscriptionsConfig.dispatch === "async") {
+      await this.enqueueSubscriptionDispatchJobs(emittedEvents);
+      await this.flushTelemetryToStreams(scope, telemetryStart);
+      return [];
+    }
+
+    await this.dispatchSubscriptions(emittedEvents);
+    const cascadedEvents = this.takeCommittedEvents();
+    await this.flushTelemetryToStreams(scope, telemetryStart);
+    return cascadedEvents;
   }
 
   private async runWithActionInvoker<TResult>(callback: () => TResult | Promise<TResult>): Promise<TResult> {

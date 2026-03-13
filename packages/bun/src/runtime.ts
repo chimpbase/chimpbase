@@ -135,7 +135,11 @@ export interface CreateHostOptions {
 
 const IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX = "_chimpbase.sub.seen:";
 const POSTGRES_WORKER_QUEUE_BATCH_SIZE = 8;
-const RESERVED_ENGINE_QUEUE_NAMES = new Set(["__chimpbase.cron.run", "__chimpbase.workflow.run"]);
+const RESERVED_ENGINE_QUEUE_NAMES = new Set([
+  "__chimpbase.cron.run",
+  "__chimpbase.subscription.run",
+  "__chimpbase.workflow.run",
+]);
 
 export class ChimpbaseBunHost {
   readonly config: ChimpbaseProjectConfig;
@@ -210,6 +214,9 @@ export class ChimpbaseBunHost {
       platform,
       registry,
       secrets,
+      subscriptions: {
+        dispatch: options.config.subscriptions.dispatch,
+      },
       telemetry: {
         minLevel: options.config.telemetry.minLevel,
         persist: options.config.telemetry.persist,
@@ -222,6 +229,9 @@ export class ChimpbaseBunHost {
       platform,
       registry: cloneRegistryForWorkerEngine(registry),
       secrets,
+      subscriptions: {
+        dispatch: options.config.subscriptions.dispatch,
+      },
       telemetry: {
         minLevel: options.config.telemetry.minLevel,
         persist: options.config.telemetry.persist,
@@ -828,6 +838,9 @@ function buildConfigFromApp(app: ChimpbaseAppDefinition): ChimpbaseProjectConfig
         : Bun.env.CHIMPBASE_STORAGE_PATH ?? join("data", `${app.project.name}.db`),
       url: Bun.env.CHIMPBASE_DATABASE_URL ?? Bun.env.DATABASE_URL ?? null,
     },
+    subscriptions: {
+      dispatch: inferSubscriptionDispatchMode(),
+    },
     telemetry: {
       minLevel: app.telemetry.minLevel,
       persist: app.telemetry.persist,
@@ -880,6 +893,11 @@ function inferNumberEnv(name: string): number | undefined {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function inferSubscriptionDispatchMode(): "async" | "sync" | undefined {
+  const value = Bun.env.CHIMPBASE_SUBSCRIPTION_DISPATCH_MODE;
+  return value === "async" || value === "sync" ? value : undefined;
 }
 
 export function getRouteKey(request: RouteRequestLike): string {

@@ -36,6 +36,7 @@ export interface ChimpbaseProjectConfig {
     url: string | null;
   };
   subscriptions: {
+    dispatch: "async" | "sync";
     idempotency: {
       retention: { enabled: boolean; maxAgeDays: number; schedule: string };
     };
@@ -74,6 +75,7 @@ export interface ChimpbaseProjectConfigInput {
     url?: string | null;
   };
   subscriptions?: {
+    dispatch?: "async" | "sync";
     idempotency?: {
       retention?: { enabled?: boolean; maxAgeDays?: number; schedule?: string };
     };
@@ -231,6 +233,7 @@ export function normalizeProjectConfig(
       url: input.storage?.url ?? null,
     },
     subscriptions: {
+      dispatch: input.subscriptions?.dispatch ?? "sync",
       idempotency: {
         retention: {
           enabled: input.subscriptions?.idempotency?.retention?.enabled ?? false,

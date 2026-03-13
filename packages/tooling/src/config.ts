@@ -50,6 +50,7 @@ export async function loadProjectConfig(
       url: readNullableString(storage, "url"),
     },
     subscriptions: {
+      dispatch: readSubscriptionDispatchMode(subscriptions, "dispatch"),
       idempotency: {
         retention: {
           enabled: readBoolean(subscriptionsIdempotencyRetention, "enabled"),
@@ -209,6 +210,11 @@ function readLogLevel(table: TomlTable | undefined, key: string): "debug" | "err
   return value === "debug" || value === "info" || value === "warn" || value === "error"
     ? value
     : undefined;
+}
+
+function readSubscriptionDispatchMode(table: TomlTable | undefined, key: string): "async" | "sync" | undefined {
+  const value = readString(table, key);
+  return value === "async" || value === "sync" ? value : undefined;
 }
 
 function readString(table: TomlTable | undefined, key: string): string | undefined {

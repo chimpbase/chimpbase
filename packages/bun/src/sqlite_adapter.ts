@@ -711,7 +711,8 @@ function persistEvents(db: Database, events: ChimpbaseEventRecord[]): void {
     "INSERT INTO _chimpbase_events (event_name, payload_json) VALUES (?1, ?2)",
   );
   for (const event of events) {
-    statement.run(event.name, event.payloadJson);
+    const result = statement.run(event.name, event.payloadJson);
+    event.id = result.lastInsertRowid === undefined ? undefined : Number(result.lastInsertRowid);
   }
 }
 

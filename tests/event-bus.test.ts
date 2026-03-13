@@ -29,6 +29,7 @@ async function createTestEngine(eventBus: ChimpbaseEventBus) {
     platform,
     registry,
     secrets: { get: () => null },
+    subscriptions: { dispatch: "sync" },
     telemetry: { minLevel: "debug", persist: { log: false, metric: false, trace: false } },
     worker: { leaseMs: 30_000, maxAttempts: 5, retryDelayMs: 0 },
   });

@@ -57,6 +57,7 @@ interface CreateChimpbaseRuntimeOptions {
     url?: string | null;
   };
   subscriptions?: {
+    dispatch?: "async" | "sync";
     idempotency?: {
       retention?: {
         enabled?: boolean;
@@ -232,6 +233,7 @@ async function createChimpbaseFromApp(
         ?? null,
     },
     subscriptions: {
+      dispatch: options.subscriptions?.dispatch ?? inferSubscriptionDispatchMode(),
       idempotency: {
         retention: options.subscriptions?.idempotency?.retention,
       },
@@ -317,6 +319,11 @@ function inferStorageEngine(options: Pick<CreateChimpbaseFromAppOptions, "storag
   }
 
   return "sqlite";
+}
+
+function inferSubscriptionDispatchMode(): "async" | "sync" | undefined {
+  const value = Bun.env.CHIMPBASE_SUBSCRIPTION_DISPATCH_MODE;
+  return value === "async" || value === "sync" ? value : undefined;
 }
 
 function inferNumberEnv(name: string): number | undefined {

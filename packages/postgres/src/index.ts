@@ -707,10 +707,11 @@ async function persistEvents(queryable: Queryable, events: ChimpbaseEventRecord[
   }
 
   for (const event of events) {
-    await queryable.query(
-      "INSERT INTO _chimpbase_events (event_name, payload_json) VALUES ($1, $2::jsonb)",
+    const result = await queryable.query<{ id: number }>(
+      "INSERT INTO _chimpbase_events (event_name, payload_json) VALUES ($1, $2::jsonb) RETURNING id",
       [event.name, event.payloadJson],
     );
+    event.id = result.rows[0]?.id;
   }
 }
 

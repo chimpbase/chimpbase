@@ -817,6 +817,58 @@ describe("chimpbase-bun runtime", () => {
     host.close();
   });
 
+  test("can dispatch subscriptions asynchronously through the internal queue", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-async-subscriptions-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      project: { name: "async-subscriptions" },
+      projectDir,
+      storage: {
+        engine: "sqlite",
+        path: "data/async-subscriptions.db",
+      },
+      subscriptions: {
+        dispatch: "async",
+      },
+    });
+
+    host.registerAction("emitAudit", async (ctx, value) => {
+      ctx.pubsub.publish("audit.created", { value });
+      return { ok: true };
+    });
+    host.registerAction("prepareAuditTable", async (ctx) => {
+      await ctx.query("CREATE TABLE IF NOT EXISTS async_audit (id INTEGER PRIMARY KEY, value TEXT NOT NULL)");
+      return null;
+    });
+    host.registerAction(
+      "listAudit",
+      async (ctx) => await ctx.query("SELECT value FROM async_audit ORDER BY id ASC"),
+    );
+    host.registerSubscription("audit.created", async (ctx, payload) => {
+      await ctx.query("INSERT INTO async_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+    }, { name: "onAuditCreated" });
+
+    try {
+      await host.executeAction("prepareAuditTable");
+      const emitted = await host.executeAction("emitAudit", ["from-async"]);
+      expect(emitted.emittedEvents).toEqual([
+        expect.objectContaining({ name: "audit.created" }),
+      ]);
+
+      const beforeDrain = await host.executeAction("listAudit");
+      expect(beforeDrain.result).not.toContainEqual({ value: "from-async" });
+
+      const queueResult = await host.processNextQueueJob();
+      expect(queueResult?.queueName).toBe("__chimpbase.subscription.run");
+
+      const afterDrain = await host.executeAction("listAudit");
+      expect(afterDrain.result).toContainEqual({ value: "from-async" });
+    } finally {
+      host.close();
+    }
+  });
+
   test("processes queue jobs with secrets and telemetry", async () => {
     const previousSender = process.env.TODO_NOTIFIER_SENDER;
     process.env.TODO_NOTIFIER_SENDER = "alerts@chimpbase.dev";
