@@ -29,7 +29,7 @@ import type {
   ChimpbaseWorkflowStepsDraftDefinition,
   ChimpbaseWorkflowStepDefinition,
 } from "@chimpbase/runtime";
-import { runWithActionInvoker } from "@chimpbase/runtime";
+import { resolveChimpbaseActionRegistrationName, runWithActionInvoker } from "@chimpbase/runtime";
 
 import { computeNextCronFireTime } from "./cron.ts";
 import { NoopEventBus, type ChimpbaseEventBus } from "./event-bus.ts";
@@ -1073,7 +1073,10 @@ export class ChimpbaseEngine {
           const args = step.args
             ? step.args({ input, state, workflowId })
             : [];
-          const result = await this.invokeActionByName(step.action, normalizeActionArgs(args));
+          const actionName = typeof step.action === "string"
+            ? step.action
+            : resolveChimpbaseActionRegistrationName(step.action);
+          const result = await this.invokeActionByName(actionName, normalizeActionArgs(args));
           const nextState = step.onResult
             ? step.onResult({ input, result, state, workflowId })
             : state;

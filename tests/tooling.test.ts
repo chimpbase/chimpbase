@@ -262,6 +262,37 @@ describe("@chimpbase/tooling", () => {
       { name: "001_init", sql: "SELECT 1;" },
     ]);
   });
+
+  test("infers names for exported unnamed actions from chimpbase.app.ts", async () => {
+    const projectDir = await createTempDir("unnamed-app-actions");
+    const runtimeImportPath = resolve(import.meta.dir, "../packages/runtime/index.ts");
+    await writeFile(
+      resolve(projectDir, "chimpbase.app.ts"),
+      [
+        `import { action } from ${JSON.stringify(runtimeImportPath)};`,
+        "",
+        "export const health = action({",
+        '  async handler() { return { ok: true }; },',
+        "});",
+        "",
+        "export default {",
+        '  project: { name: "tooling-unnamed-action" },',
+        "  registrations: [health],",
+        "};",
+      ].join("\n"),
+    );
+
+    const app = await loadProjectAppDefinition(projectDir);
+
+    expect(app).not.toBeNull();
+    expect(app?.registrations).toHaveLength(1);
+    expect(app?.registrations[0]).toEqual(
+      expect.objectContaining({
+        kind: "action",
+        name: "chimpbase.app.ts#health",
+      }),
+    );
+  });
 });
 
 async function createTempDir(label: string): Promise<string> {

@@ -302,6 +302,46 @@ Inside an active chimpbase runtime scope, or after the action has been registere
 
 `ctx.action(...)` still works when you want explicit dispatch or dynamic references. `action("name", handler)` also still works for tuple-style internal handlers and compatibility with older code.
 
+When the action is exported from `chimpbase.app.ts`, the loader can infer a durable id from `module path + export name`, so `name` becomes optional:
+
+```ts
+import { action, v, workflow, workflowActionStep } from "@chimpbase/runtime";
+
+export const createCustomer = action({
+  args: v.object({
+    email: v.string(),
+    name: v.string(),
+  }),
+  async handler(ctx, input) {
+    return await ctx.query(
+      "insert into customers (email, name) values (?1, ?2) returning id, email, name",
+      [input.email, input.name],
+    );
+  },
+});
+
+export const onboardingWorkflow = workflow({
+  name: "customer.onboarding",
+  version: 1,
+  initialState(input) {
+    return { customerId: input.customerId, created: false };
+  },
+  steps: [
+    workflowActionStep("create-customer", createCustomer, {
+      args: ({ input }) => [{ email: input.email, name: input.name }],
+      onResult: ({ result, state }) => ({ ...state, created: true, customerId: result.id }),
+    }),
+  ],
+});
+
+export default {
+  project: { name: "acme-app" },
+  registrations: [createCustomer, onboardingWorkflow],
+};
+```
+
+In that case the inferred action id is `chimpbase.app.ts#createCustomer`. If you register a bare action manually with `chimpbase.register(...)` outside app module loading, `name` is still required because there is no stable export identity to derive from.
+
 ## Quick start
 
 From this repository:

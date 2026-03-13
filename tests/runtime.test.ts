@@ -288,6 +288,35 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("fails clearly when registering an unnamed action outside app module loading", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-unnamed-action-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      app: defineChimpbaseApp({
+        project: { name: "unnamed-action" },
+      }),
+      projectDir,
+      storage: {
+        engine: "memory",
+      },
+    });
+
+    const health = action({
+      async handler() {
+        return { ok: true };
+      },
+    });
+
+    try {
+      expect(() => host.register(health)).toThrow(
+        "unnamed action registration cannot be registered or referenced yet",
+      );
+    } finally {
+      host.close();
+    }
+  });
+
   test("emits runtime debug logs when enabled", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-debug-logs-"));
     cleanupDirs.push(projectDir);
@@ -1043,6 +1072,89 @@ describe("chimpbase-bun runtime", () => {
           expect.objectContaining({ customerId: "cus_123", step: "provision" }),
           expect.objectContaining({ customerId: "cus_123", step: "activate" }),
         ]),
+      );
+    } finally {
+      host.close();
+    }
+  });
+
+  test("loads exported unnamed actions and workflow refs from chimpbase.app.ts", async () => {
+    const projectDir = await createInlineFixture("workflow-unnamed-actions", {
+      "chimpbase.app.ts": [
+        'import { action, workflow, workflowActionStep } from "@chimpbase/runtime";',
+        "",
+        "export const createGreeting = action({",
+        "  async handler(ctx, name) {",
+        '    await ctx.collection.insert("workflow_named_audit", { name, step: "create" });',
+        '    return { greeting: `hello ${name}` };',
+        "  },",
+        "});",
+        "",
+        "export const greetingWorkflow = workflow({",
+        '  name: "greeting.workflow",',
+        "  version: 1,",
+        "  initialState(input) {",
+        "    return {",
+        "      greeting: null,",
+        "      name: input.name,",
+        "    };",
+        "  },",
+        "  steps: [",
+        '    workflowActionStep("create-greeting", createGreeting, {',
+        "      args: ({ input }) => [input.name],",
+        "      onResult: ({ result, state }) => ({ ...state, greeting: result.greeting }),",
+        "    }),",
+        "  ],",
+        "});",
+        "",
+        "export const startGreetingWorkflow = action({",
+        "  async handler(ctx, name) {",
+        '    return await ctx.workflow.start("greeting.workflow", { name }, { workflowId: `greeting:${name}` });',
+        "  },",
+        "});",
+        "",
+        "export const getGreetingWorkflow = action({",
+        "  async handler(ctx, name) {",
+        '    return await ctx.workflow.get(`greeting:${name}`);',
+        "  },",
+        "});",
+        "",
+        "export default {",
+        '  project: { name: "workflow-unnamed-actions" },',
+        "  registrations: [",
+        "    createGreeting,",
+        "    greetingWorkflow,",
+        "    startGreetingWorkflow,",
+        "    getGreetingWorkflow,",
+        "  ],",
+        "};",
+      ].join("\n"),
+    }, []);
+
+    const host = await ChimpbaseBunHost.load(projectDir);
+
+    try {
+      const started = await host.executeAction("chimpbase.app.ts#startGreetingWorkflow", ["alice"]);
+      expect(started.result).toEqual({
+        status: "running",
+        workflowId: "greeting:alice",
+        workflowName: "greeting.workflow",
+        workflowVersion: 1,
+      });
+
+      const run = await host.processNextQueueJob();
+      expect(run?.queueName).toBe("__chimpbase.workflow.run");
+
+      const instance = await host.executeAction("chimpbase.app.ts#getGreetingWorkflow", ["alice"]);
+      expect(instance.result).toEqual(
+        expect.objectContaining({
+          currentStepId: null,
+          state: {
+            greeting: "hello alice",
+            name: "alice",
+          },
+          status: "completed",
+        }),
       );
     } finally {
       host.close();

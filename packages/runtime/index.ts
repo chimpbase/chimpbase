@@ -155,7 +155,7 @@ export interface ChimpbaseWorkflowActionStepDefinition<
   TArgs = unknown[],
   TResult = unknown,
 > {
-  action: string;
+  action: string | ChimpbaseActionRegistration<TArgs, TResult, any>;
   args?: (params: ChimpbaseWorkflowRuntimeState<TInput, TState>) => TArgs;
   id: string;
   kind: "workflow_action";
@@ -746,7 +746,7 @@ interface ChimpbaseActionDefinitionInput<
 > extends ChimpbaseActionOptions {
   args: ChimpbaseValidator<TArgs>;
   handler: ChimpbaseObjectActionHandler<TArgs, TResult, TActions>;
-  name: string;
+  name?: string;
 }
 
 interface ChimpbaseActionWithoutArgsInput<
@@ -754,7 +754,7 @@ interface ChimpbaseActionWithoutArgsInput<
   TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry,
 > extends ChimpbaseActionOptions {
   handler: ChimpbaseTupleActionHandler<[], TResult, TActions>;
-  name: string;
+  name?: string;
 }
 
 export function action<TArgs extends unknown[] = unknown[], TResult = unknown, TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry>(
@@ -780,18 +780,22 @@ export function action<TArgs = unknown[], TResult = unknown, TActions extends Ch
   handler?: ChimpbaseTupleActionHandler<any[], TResult, TActions>,
   options?: ChimpbaseActionOptions,
 ): ChimpbaseActionRegistration<TArgs, TResult, TActions> {
+  if (inputOrName === undefined || inputOrName === null) {
+    throw new Error("action requires either a string name or a definition object");
+  }
+
   if (typeof inputOrName !== "string") {
     const definition = inputOrName;
     return createActionRegistration({
       args: "args" in definition ? definition.args : undefined,
       handler: definition.handler as ChimpbaseActionHandler<TArgs, TResult, TActions>,
       kind: "action",
-      name: definition.name,
+      name: definition.name ?? "",
       telemetry: definition.telemetry,
     });
   }
 
-  if (isActionRegistration(handler)) {
+  if (isChimpbaseActionRegistration(handler)) {
     return createActionRegistration({
       args: handler.args,
       handler: handler.handler as ChimpbaseActionHandler<TArgs, TResult, TActions>,
@@ -896,7 +900,7 @@ export function workflowActionStep<TInput = unknown, TState = unknown, TArgs = u
   options: Omit<ChimpbaseWorkflowActionStepDefinition<TInput, TState, TArgs, TResult>, "action" | "id" | "kind"> = {},
 ): ChimpbaseWorkflowActionStepDefinition<TInput, TState, TArgs, TResult> {
   return {
-    action: typeof actionNameOrReference === "string" ? actionNameOrReference : actionNameOrReference.name,
+    action: actionNameOrReference,
     ...options,
     id,
     kind: "workflow_action",
@@ -1060,17 +1064,19 @@ export function register(
 ): void {
   for (const entry of flattenChimpbaseEntries(entriesOrGroups)) {
     switch (entry.kind) {
-      case "action":
+      case "action": {
+        const actionName = resolveActionRegistrationName(entry);
         target.bindActionInvoker?.(entry);
         if (entry.args) {
-          target.registerAction(entry.name, entry.handler, { args: entry.args });
+          target.registerAction(actionName, entry.handler, { args: entry.args });
         } else {
-          target.registerAction(entry.name, entry.handler);
+          target.registerAction(actionName, entry.handler);
         }
         if (entry.telemetry !== undefined) {
-          target.setTelemetryOverride?.(`action:${entry.name}`, entry.telemetry);
+          target.setTelemetryOverride?.(`action:${actionName}`, entry.telemetry);
         }
         break;
+      }
       case "cron":
         if (typeof target.registerCron !== "function") {
           throw new Error(`registration target does not support cron entries: ${entry.name}`);
@@ -1512,7 +1518,7 @@ export const v = {
   },
 };
 
-function isActionRegistration(value: unknown): value is ChimpbaseActionRegistration<any, any, any> {
+export function isChimpbaseActionRegistration(value: unknown): value is ChimpbaseActionRegistration<any, any, any> {
   return Boolean(
     value
       && (typeof value === "object" || typeof value === "function")
@@ -1520,6 +1526,29 @@ function isActionRegistration(value: unknown): value is ChimpbaseActionRegistrat
       && typeof (value as { name?: unknown }).name === "string"
       && "handler" in (value as object),
   );
+}
+
+export function hasChimpbaseActionRegistrationName(
+  value: ChimpbaseActionRegistration<any, any, any>,
+): boolean {
+  return value.name.length > 0;
+}
+
+export function setChimpbaseActionRegistrationName(
+  value: ChimpbaseActionRegistration<any, any, any>,
+  name: string,
+): void {
+  if (!name) {
+    throw new Error("action registration name cannot be empty");
+  }
+
+  defineRegistrationProperty(value, "name", name);
+}
+
+export function resolveChimpbaseActionRegistrationName(
+  value: ChimpbaseActionRegistration<any, any, any>,
+): string {
+  return resolveActionRegistrationName(value);
 }
 
 function getActionInvokerStorage(): AsyncLocalStorage<ChimpbaseActionInvoker> {
@@ -1555,15 +1584,16 @@ function createActionRegistration<
     args?: ChimpbaseValidator<TArgs>;
     handler: ChimpbaseActionHandler<TArgs, TResult, TActions>;
     kind: "action";
-    name: string;
+    name?: string;
     telemetry?: ChimpbaseTelemetryPersistOption;
   },
 ): ChimpbaseActionRegistration<TArgs, TResult, TActions> {
   const callable = (async (...args: ChimpbaseActionCallArgs<TArgs>): Promise<TResult> => {
     const invoker = actionInvokerStorage.getStore() ?? getBoundActionInvokers().get(callable);
     if (!invoker) {
+      const actionName = formatActionRegistrationName(registration.name);
       throw new Error(
-        `action ${registration.name} requires an active chimpbase runtime context or a registered host binding; use ctx.action(${registration.name}, ...) or host.executeAction(${registration.name}, ...)`,
+        `action ${actionName} requires an active chimpbase runtime context or a registered host binding; use ctx.action(${actionName}, ...) or host.executeAction(${actionName}, ...)`,
       );
     }
 
@@ -1571,7 +1601,7 @@ function createActionRegistration<
   }) as ChimpbaseActionRegistration<TArgs, TResult, TActions>;
 
   defineRegistrationProperty(callable, "kind", registration.kind);
-  defineRegistrationProperty(callable, "name", registration.name);
+  defineRegistrationProperty(callable, "name", registration.name ?? "");
   defineRegistrationProperty(callable, "handler", registration.handler);
 
   if (registration.args !== undefined) {
@@ -1583,6 +1613,22 @@ function createActionRegistration<
   }
 
   return callable;
+}
+
+function resolveActionRegistrationName(
+  registration: ChimpbaseActionRegistration<any, any, any>,
+): string {
+  if (registration.name.length > 0) {
+    return registration.name;
+  }
+
+  throw new Error(
+    "unnamed action registration cannot be registered or referenced yet; add a name explicitly or export it from chimpbase.app.ts so the loader can infer module path + export name",
+  );
+}
+
+function formatActionRegistrationName(name: string | undefined): string {
+  return name && name.length > 0 ? name : "<unnamed action>";
 }
 
 function defineRegistrationProperty<TTarget extends object, TKey extends keyof any>(
@@ -1697,7 +1743,7 @@ function describeWorkflowSteps<TInput = unknown, TState = unknown>(
     switch (step.kind) {
       case "workflow_action":
         return {
-          action: step.action,
+          action: typeof step.action === "string" ? step.action : resolveActionRegistrationName(step.action),
           id: step.id,
           kind: step.kind,
         };

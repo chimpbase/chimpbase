@@ -59,6 +59,10 @@ chimpbase.register(
 
 Inside an active chimpbase runtime scope, action refs are directly callable, so one action can invoke another with `await createCustomer(input)`.
 
+When an unnamed action is exported from `chimpbase.app.ts`, the loader infers a durable id from `module path + export name`, for example `chimpbase.app.ts#createCustomer`. That keeps workflow, CLI and persistence references stable without requiring a manual `name`.
+
+If you register a bare action directly with `host.register(...)` outside app module loading, keep using `name` because there is no export identity to infer.
+
 ## Per-handler telemetry persistence
 
 The `action()`, `worker()`, `subscription()` and `cron()` factories accept an optional `telemetry` override:

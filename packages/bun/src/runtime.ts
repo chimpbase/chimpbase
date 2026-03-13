@@ -33,6 +33,7 @@ import {
   describeWorkflow,
   register as registerEntries,
   registerFrom as registerEntriesFrom,
+  resolveChimpbaseActionRegistrationName,
   subscription as createSubscriptionEntry,
   workflow as createWorkflowEntry,
   worker as createWorkerEntry,
@@ -271,7 +272,9 @@ export class ChimpbaseBunHost {
     nameOrReference: string | ChimpbaseActionReference<any, any, any>,
     ...args: unknown[]
   ): Promise<ActionExecutionResult> {
-    const actionName = typeof nameOrReference === "string" ? nameOrReference : nameOrReference.name;
+    const actionName = typeof nameOrReference === "string"
+      ? nameOrReference
+      : resolveChimpbaseActionRegistrationName(nameOrReference);
     this.debug("action executing", { name: actionName });
 
     try {
@@ -281,7 +284,7 @@ export class ChimpbaseBunHost {
         normalizeActionExecutionArgs(args[0]),
       ))
         : await this.runEngineOperation(async () => await this.engine.executeAction(
-          nameOrReference.name,
+          actionName,
           normalizeReferenceInvocationArgs(nameOrReference, args),
         ));
 
