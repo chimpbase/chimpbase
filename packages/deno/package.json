@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/deno",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Deno CLI and self-hosted host for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -31,10 +31,10 @@
     "access": "public"
   },
   "dependencies": {
-    "@chimpbase/core": "0.1.22",
-    "@chimpbase/postgres": "0.1.22",
-    "@chimpbase/runtime": "0.1.22",
-    "@chimpbase/tooling": "0.1.22",
+    "@chimpbase/core": "0.1.23",
+    "@chimpbase/postgres": "0.1.23",
+    "@chimpbase/runtime": "0.1.23",
+    "@chimpbase/tooling": "0.1.23",
     "kysely": "^0.28.11"
   },
   "devDependencies": {

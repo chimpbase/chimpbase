@@ -610,6 +610,63 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("skips missed cron fires on Postgres and resumes from the current slot", async () => {
+      const realDateNow = Date.now;
+      let now = Date.UTC(2026, 2, 11, 12, 1, 0);
+      Date.now = () => now;
+
+      const database = await postgres.createDatabase("cron_skip_missed");
+      const projectDir = await createCronFixture("cron_skip_missed", database.url);
+      const host = await createChimpbase.from(projectDir, {
+        storage: { engine: "postgres", url: database.url },
+      });
+
+      try {
+        await host.syncCronSchedules();
+
+        const initialSchedules = await host.executeAction("listCronSchedules");
+        expect(initialSchedules.result).toEqual([
+          {
+            cron_expression: "*/5 * * * *",
+            next_fire_at_ms: Date.UTC(2026, 2, 11, 12, 5, 0),
+            schedule_name: "billing.rollup",
+          },
+        ]);
+
+        now = Date.UTC(2026, 2, 11, 12, 22, 0);
+        expect(await host.processNextCronSchedule()).toEqual({
+          fireAt: "2026-03-11T12:20:00.000Z",
+          fireAtMs: Date.UTC(2026, 2, 11, 12, 20, 0),
+          nextFireAt: "2026-03-11T12:25:00.000Z",
+          nextFireAtMs: Date.UTC(2026, 2, 11, 12, 25, 0),
+          scheduleName: "billing.rollup",
+        });
+
+        expect((await host.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+        expect(await host.processNextCronSchedule()).toBeNull();
+
+        const audit = await host.executeAction("listCronAudit");
+        expect(audit.result).toEqual([
+          {
+            fire_at_ms: Date.UTC(2026, 2, 11, 12, 20, 0),
+            schedule_name: "billing.rollup",
+          },
+        ]);
+
+        const schedulesAfterResume = await host.executeAction("listCronSchedules");
+        expect(schedulesAfterResume.result).toEqual([
+          {
+            cron_expression: "*/5 * * * *",
+            next_fire_at_ms: Date.UTC(2026, 2, 11, 12, 25, 0),
+            schedule_name: "billing.rollup",
+          },
+        ]);
+      } finally {
+        Date.now = realDateNow;
+        host.close();
+      }
+    }, 30000);
+
     test("boots the todo-ts example against Postgres", async () => {
       const database = await postgres.createDatabase("todo_ts");
       const fixture = await createTodoTsFixture("postgres");

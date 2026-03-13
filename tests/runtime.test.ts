@@ -1488,6 +1488,92 @@ describe("chimpbase-bun runtime", () => {
     }
   });
 
+  test("skips missed cron fires and resumes from the current slot", async () => {
+    const realDateNow = Date.now;
+    let now = Date.UTC(2026, 2, 11, 10, 2, 0);
+    Date.now = () => now;
+
+    const projectDir = await createInlineFixture("cron-skip-missed", {
+      "chimpbase.app.ts": [
+        'import { action, cron } from "@chimpbase/runtime";',
+        "",
+        "export default {",
+        '  migrations: {',
+        '    sqlite: [{ name: "001_init", sql: "CREATE TABLE IF NOT EXISTS cron_audit (id INTEGER PRIMARY KEY, schedule_name TEXT NOT NULL, fire_at_ms INTEGER NOT NULL, fire_at_iso TEXT NOT NULL);" }],',
+        "  },",
+        '  project: { name: "cron-skip-missed-test" },',
+        '  registrations: [',
+        '    cron("billing.rollup", "*/5 * * * *", async (ctx, invocation) => {',
+        "      await ctx.query(",
+        '        "INSERT INTO cron_audit (schedule_name, fire_at_ms, fire_at_iso) VALUES (?1, ?2, ?3)",',
+        "        [invocation.name, invocation.fireAtMs, invocation.fireAt],",
+        "      );",
+        "    }),",
+        '    action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms, fire_at_iso FROM cron_audit ORDER BY fire_at_ms ASC")),',
+        '    action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
+        "  ],",
+        "};",
+      ].join("\n"),
+    }, [
+      "[project]",
+      'name = "cron-skip-missed-test"',
+      "",
+      "[storage]",
+      'engine = "sqlite"',
+      'path = "data/cron-skip-missed.db"',
+      "",
+    ]);
+
+    const host = await ChimpbaseBunHost.load(projectDir);
+
+    try {
+      await host.syncCronSchedules();
+
+      const initialSchedules = await host.executeAction("listCronSchedules");
+      expect(initialSchedules.result).toEqual([
+        {
+          cron_expression: "*/5 * * * *",
+          next_fire_at_ms: Date.UTC(2026, 2, 11, 10, 5, 0),
+          schedule_name: "billing.rollup",
+        },
+      ]);
+
+      now = Date.UTC(2026, 2, 11, 10, 22, 0);
+      const resumedSchedule = await host.processNextCronSchedule();
+      expect(resumedSchedule).toEqual({
+        fireAt: "2026-03-11T10:20:00.000Z",
+        fireAtMs: Date.UTC(2026, 2, 11, 10, 20, 0),
+        nextFireAt: "2026-03-11T10:25:00.000Z",
+        nextFireAtMs: Date.UTC(2026, 2, 11, 10, 25, 0),
+        scheduleName: "billing.rollup",
+      });
+
+      expect((await host.processNextQueueJob())?.queueName).toBe("__chimpbase.cron.run");
+      expect(await host.processNextCronSchedule()).toBeNull();
+
+      const audit = await host.executeAction("listCronAudit");
+      expect(audit.result).toEqual([
+        {
+          fire_at_iso: "2026-03-11T10:20:00.000Z",
+          fire_at_ms: Date.UTC(2026, 2, 11, 10, 20, 0),
+          schedule_name: "billing.rollup",
+        },
+      ]);
+
+      const schedulesAfterResume = await host.executeAction("listCronSchedules");
+      expect(schedulesAfterResume.result).toEqual([
+        {
+          cron_expression: "*/5 * * * *",
+          next_fire_at_ms: Date.UTC(2026, 2, 11, 10, 25, 0),
+          schedule_name: "billing.rollup",
+        },
+      ]);
+    } finally {
+      Date.now = realDateNow;
+      host.close();
+    }
+  });
+
   test("routes failed jobs to a custom dlq", async () => {
     const projectDir = await createInlineFixture("dlq", {
       "chimpbase.app.ts": [

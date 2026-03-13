@@ -389,11 +389,14 @@ export class ChimpbaseEngine {
       return null;
     }
 
-    const fireAtMs = claimed.next_fire_at_ms;
-    let nextFireAtMs: number;
+    const now = this.platform.now();
+    const { fireAtMs, nextFireAtMs } = this.resolveNextCronExecutionWindow(
+      registration.schedule,
+      claimed.next_fire_at_ms,
+      now,
+    );
 
     try {
-      nextFireAtMs = computeNextCronFireTime(registration.schedule, fireAtMs);
       await this.runInTransaction(async () => {
         const inserted = await this.adapter.insertCronRun(claimed.schedule_name, fireAtMs);
         if (inserted) {
@@ -405,7 +408,7 @@ export class ChimpbaseEngine {
 
         await this.adapter.advanceCronSchedule(
           claimed.schedule_name,
-          fireAtMs,
+          claimed.next_fire_at_ms,
           nextFireAtMs,
           claimed.lease_token,
         );
@@ -422,6 +425,22 @@ export class ChimpbaseEngine {
       nextFireAtMs,
       scheduleName: claimed.schedule_name,
     };
+  }
+
+  private resolveNextCronExecutionWindow(
+    schedule: string,
+    persistedFireAtMs: number,
+    now: number,
+  ): { fireAtMs: number; nextFireAtMs: number } {
+    let fireAtMs = persistedFireAtMs;
+    let nextFireAtMs = computeNextCronFireTime(schedule, fireAtMs);
+
+    while (now >= nextFireAtMs) {
+      fireAtMs = nextFireAtMs;
+      nextFireAtMs = computeNextCronFireTime(schedule, fireAtMs);
+    }
+
+    return { fireAtMs, nextFireAtMs };
   }
 
   async syncRegisteredCrons(): Promise<void> {
