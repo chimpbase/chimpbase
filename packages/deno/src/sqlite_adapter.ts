@@ -157,6 +157,20 @@ export async function ensureSqliteInternalTables(db: SqliteDatabase): Promise<vo
 
   db.exec(
     `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_queue_jobs_pending_due
+      ON _chimpbase_queue_jobs(status, available_at_ms, id);
+    `,
+  );
+
+  db.exec(
+    `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_queue_jobs_processing_due
+      ON _chimpbase_queue_jobs(status, lease_expires_at_ms, id);
+    `,
+  );
+
+  db.exec(
+    `
       CREATE TABLE IF NOT EXISTS _chimpbase_cron_schedules (
         schedule_name TEXT PRIMARY KEY,
         cron_expression TEXT NOT NULL,

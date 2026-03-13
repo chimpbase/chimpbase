@@ -127,6 +127,22 @@ export async function ensurePostgresInternalTables(pool: Pool): Promise<void> {
 
   await pool.query(
     `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_queue_jobs_pending_due
+      ON _chimpbase_queue_jobs(available_at_ms, id)
+      WHERE status = 'pending'
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_queue_jobs_processing_due
+      ON _chimpbase_queue_jobs(lease_expires_at_ms, id)
+      WHERE status = 'processing' AND lease_expires_at_ms IS NOT NULL
+    `,
+  );
+
+  await pool.query(
+    `
       CREATE TABLE IF NOT EXISTS _chimpbase_cron_schedules (
         schedule_name TEXT PRIMARY KEY,
         cron_expression TEXT NOT NULL,
