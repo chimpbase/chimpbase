@@ -92,6 +92,7 @@ describe("@chimpbase/tooling", () => {
       },
     });
     expect(config.worker).toEqual({
+      concurrency: 1,
       leaseMs: 45000,
       maxAttempts: 9,
       pollIntervalMs: 800,
@@ -141,6 +142,7 @@ describe("@chimpbase/tooling", () => {
           retention: { enabled: false, maxAgeDays: 30, schedule: "0 2 * * *" },
         },
         worker: {
+          concurrency: 1,
           leaseMs: 30000,
           maxAttempts: 5,
           pollIntervalMs: 250,

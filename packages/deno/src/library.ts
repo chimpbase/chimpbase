@@ -60,6 +60,7 @@ interface CreateChimpbaseRuntimeOptions {
     schedule?: string;
   };
   workerRuntime?: {
+    concurrency?: number;
     leaseMs?: number;
     pollIntervalMs?: number;
   };
@@ -240,6 +241,7 @@ async function createChimpbaseDenoFromApp(
       retention: options.telemetryRetention,
     },
     worker: {
+      concurrency: options.workerRuntime?.concurrency ?? inferNumberEnv("CHIMPBASE_WORKER_CONCURRENCY"),
       leaseMs: options.workerRuntime?.leaseMs ?? inferNumberEnv("CHIMPBASE_WORKER_LEASE_MS"),
       maxAttempts: options.app.worker.maxAttempts,
       pollIntervalMs: options.workerRuntime?.pollIntervalMs ?? inferNumberEnv("CHIMPBASE_WORKER_POLL_INTERVAL_MS"),

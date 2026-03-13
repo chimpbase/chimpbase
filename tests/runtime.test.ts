@@ -33,6 +33,7 @@ describe("chimpbase-bun runtime", () => {
       CHIMPBASE_SERVER_PORT: process.env.CHIMPBASE_SERVER_PORT,
       CHIMPBASE_STORAGE_ENGINE: process.env.CHIMPBASE_STORAGE_ENGINE,
       CHIMPBASE_STORAGE_PATH: process.env.CHIMPBASE_STORAGE_PATH,
+      CHIMPBASE_WORKER_CONCURRENCY: process.env.CHIMPBASE_WORKER_CONCURRENCY,
       CHIMPBASE_WORKER_LEASE_MS: process.env.CHIMPBASE_WORKER_LEASE_MS,
       CHIMPBASE_WORKER_MAX_ATTEMPTS: process.env.CHIMPBASE_WORKER_MAX_ATTEMPTS,
       CHIMPBASE_WORKER_POLL_INTERVAL_MS: process.env.CHIMPBASE_WORKER_POLL_INTERVAL_MS,
@@ -45,6 +46,7 @@ describe("chimpbase-bun runtime", () => {
     process.env.CHIMPBASE_SERVER_PORT = "4310";
     process.env.CHIMPBASE_STORAGE_ENGINE = "memory";
     process.env.CHIMPBASE_STORAGE_PATH = "ignored.db";
+    process.env.CHIMPBASE_WORKER_CONCURRENCY = "3";
     process.env.CHIMPBASE_WORKER_LEASE_MS = "41000";
     process.env.CHIMPBASE_WORKER_MAX_ATTEMPTS = "7";
     process.env.CHIMPBASE_WORKER_POLL_INTERVAL_MS = "500";
@@ -67,6 +69,7 @@ describe("chimpbase-bun runtime", () => {
       expect(host.config.storage.engine).toBe("memory");
       expect(host.config.storage.path).toBeNull();
       expect(host.config.worker).toEqual({
+        concurrency: 3,
         leaseMs: 41000,
         maxAttempts: 5,
         pollIntervalMs: 500,

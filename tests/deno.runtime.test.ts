@@ -58,6 +58,7 @@ if (!bunSupportsBetterSqlite3) {
       installFakeDenoRuntime({
         env: {
           CHIMPBASE_SERVER_PORT: "4814",
+          CHIMPBASE_WORKER_CONCURRENCY: "3",
           CHIMPBASE_WORKER_LEASE_MS: "41000",
           CHIMPBASE_WORKER_MAX_ATTEMPTS: "4",
           CHIMPBASE_WORKER_POLL_INTERVAL_MS: "25",
@@ -95,6 +96,7 @@ if (!bunSupportsBetterSqlite3) {
           url: null,
         });
         expect(host.config.worker).toEqual({
+          concurrency: 3,
           leaseMs: 41000,
           maxAttempts: 5,
           pollIntervalMs: 25,
@@ -152,6 +154,7 @@ if (!dockerAvailable) {
       installFakeDenoRuntime({
         env: {
           CHIMPBASE_SERVER_PORT: "4810",
+          CHIMPBASE_WORKER_CONCURRENCY: "4",
           CHIMPBASE_WORKER_LEASE_MS: "41000",
           CHIMPBASE_WORKER_MAX_ATTEMPTS: "6",
           CHIMPBASE_WORKER_POLL_INTERVAL_MS: "25",
@@ -190,6 +193,7 @@ if (!dockerAvailable) {
           url: database.url,
         });
         expect(host.config.worker).toEqual({
+          concurrency: 4,
           leaseMs: 41000,
           maxAttempts: 5,
           pollIntervalMs: 25,

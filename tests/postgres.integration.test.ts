@@ -143,6 +143,74 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("runs postgres worker lanes concurrently when configured", async () => {
+      const database = await postgres.createDatabase("worker_concurrency");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-postgres-worker-concurrency-"));
+      cleanupDirs.push(projectDir);
+
+      const host = await createChimpbase({
+        project: { name: "postgres-worker-concurrency" },
+        projectDir,
+        storage: { engine: "postgres", url: database.url },
+        worker: { retryDelayMs: 0 },
+        workerRuntime: {
+          concurrency: 2,
+          pollIntervalMs: 1,
+        },
+      });
+
+      const started: string[] = [];
+      const completed: string[] = [];
+      let released = false;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = () => {
+          if (!released) {
+            released = true;
+            resolve();
+          }
+        };
+      });
+
+      host.registerAction("enqueueSlowJobs", async (ctx) => {
+        await ctx.queue.enqueue("slow.job", { value: "one" });
+        await ctx.queue.enqueue("slow.job", { value: "two" });
+        return null;
+      });
+      host.registerWorker("slow.job", async (_ctx, payload) => {
+        const value = (payload as { value: string }).value;
+        started.push(value);
+        await gate;
+        completed.push(value);
+      });
+
+      const runtime = host.start({ runWorker: true, serve: false });
+
+      try {
+        await host.executeAction("enqueueSlowJobs");
+
+        const startedJobs = await waitFor(
+          async () => [...started],
+          (values) => values.length === 2,
+          { intervalMs: 10, timeoutMs: 1_000 },
+        );
+        expect(startedJobs.sort()).toEqual(["one", "two"]);
+
+        release();
+
+        const completedJobs = await waitFor(
+          async () => [...completed],
+          (values) => values.length === 2,
+          { intervalMs: 10, timeoutMs: 1_000 },
+        );
+        expect(completedJobs.sort()).toEqual(["one", "two"]);
+      } finally {
+        release();
+        await runtime.stop();
+        host.close();
+      }
+    }, 30000);
+
     test("executes ctx.db() via Kysely while keeping ctx.query() available", async () => {
       const database = await postgres.createDatabase("kysely");
       const projectDir = await createKyselyFixture("kysely", database.url);

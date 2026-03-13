@@ -91,11 +91,25 @@ interface RouteRequestLike {
 }
 
 interface WorkerHandle {
-  stop(): void;
+  stop(): void | Promise<void>;
 }
 
 interface StorageHandle {
   close(): void | Promise<void>;
+}
+
+interface StorageResources {
+  createAdapter(): ChimpbaseEngineAdapter;
+  eventBus?: ChimpbaseEventBus;
+  storage: StorageHandle;
+  supportsConcurrentWorkers: boolean;
+}
+
+interface WorkerLane {
+  engine: ChimpbaseEngine;
+  id: number;
+  running: boolean;
+  serializedOperations: Promise<void>;
 }
 
 export type TelemetryRecord = ChimpbaseTelemetryRecord;
@@ -120,6 +134,7 @@ export interface CreateHostOptions {
 }
 
 const IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX = "_chimpbase.sub.seen:";
+const RESERVED_ENGINE_QUEUE_NAMES = new Set(["__chimpbase.cron.run", "__chimpbase.workflow.run"]);
 
 export class ChimpbaseBunHost {
   readonly config: ChimpbaseProjectConfig;
@@ -129,9 +144,11 @@ export class ChimpbaseBunHost {
   readonly registry: ChimpbaseRegistry;
   private cronRegistryDirty = true;
   private cronSyncPromise: Promise<void> | null = null;
+  private readonly createWorkerEngine: () => ChimpbaseEngine;
   private readonly debugEnabled: boolean;
   private serializedEngineOperations: Promise<void> = Promise.resolve();
   private readonly storage: StorageHandle;
+  private readonly supportsConcurrentWorkers: boolean;
 
   private constructor(
     projectDir: string,
@@ -141,6 +158,8 @@ export class ChimpbaseBunHost {
     storage: StorageHandle,
     engine: ChimpbaseEngine,
     registry: ChimpbaseRegistry,
+    createWorkerEngine: () => ChimpbaseEngine,
+    supportsConcurrentWorkers: boolean,
   ) {
     this.projectDir = projectDir;
     this.config = config;
@@ -149,6 +168,8 @@ export class ChimpbaseBunHost {
     this.storage = storage;
     this.engine = engine;
     this.registry = registry;
+    this.createWorkerEngine = createWorkerEngine;
+    this.supportsConcurrentWorkers = supportsConcurrentWorkers;
   }
 
   static async load(projectDirInput: string): Promise<ChimpbaseBunHost> {
@@ -166,7 +187,7 @@ export class ChimpbaseBunHost {
     const projectDir = resolve(options.projectDir ?? ".");
     const platform = options.platform ?? createDefaultChimpbasePlatformShim();
     const registry = createChimpbaseRegistry();
-    const { adapter, eventBus, storage } = await openStorage(
+    const storageResources = await openStorage(
       projectDir,
       options.config,
       platform,
@@ -182,9 +203,9 @@ export class ChimpbaseBunHost {
       envFileDefault: Bun.env.CHIMPBASE_ENV_FILE ?? ".env",
       secretsDirDefault: Bun.env.CHIMPBASE_SECRETS_DIR ?? "/run/secrets",
     });
-    const engine = new ChimpbaseEngine({
-      adapter,
-      eventBus,
+    const createPrimaryEngine = () => new ChimpbaseEngine({
+      adapter: storageResources.createAdapter(),
+      eventBus: storageResources.eventBus,
       platform,
       registry,
       secrets,
@@ -194,14 +215,29 @@ export class ChimpbaseBunHost {
       },
       worker: options.config.worker,
     });
+    const createWorkerEngine = () => new ChimpbaseEngine({
+      adapter: storageResources.createAdapter(),
+      eventBus: storageResources.eventBus,
+      platform,
+      registry: cloneRegistryForWorkerEngine(registry),
+      secrets,
+      telemetry: {
+        minLevel: options.config.telemetry.minLevel,
+        persist: options.config.telemetry.persist,
+      },
+      worker: options.config.worker,
+    });
+    const engine = createPrimaryEngine();
     const host = new ChimpbaseBunHost(
       projectDir,
       options.config,
       platform,
       options.debug ?? false,
-      storage,
+      storageResources.storage,
       engine,
       registry,
+      createWorkerEngine,
+      storageResources.supportsConcurrentWorkers,
     );
 
     if (options.app) {
@@ -533,6 +569,7 @@ export class ChimpbaseBunHost {
     const worker = runWorker ? this.startWorker() : null;
     const server = runServe ? this.serve() : null;
     this.debug("runtime starting", {
+      workerConcurrency: runWorker ? this.getWorkerConcurrency() : 0,
       port: runServe ? this.config.server.port : null,
       runServe,
       runWorker,
@@ -545,7 +582,7 @@ export class ChimpbaseBunHost {
       server,
       async stop() {
         server?.stop(true);
-        worker?.stop();
+        await worker?.stop();
         this.host.engine.stopEventBus();
         this.host.debug("runtime stopped");
       },
@@ -553,18 +590,73 @@ export class ChimpbaseBunHost {
   }
 
   startWorker(): WorkerHandle {
-    let running = false;
     let stopped = false;
+    if (!this.supportsConcurrentWorkers) {
+      let running = false;
+      const activeTicks = new Set<Promise<void>>();
 
-    const tick = async () => {
-      if (running || stopped) {
+      const tick = async () => {
+        if (running || stopped) {
+          return;
+        }
+
+        running = true;
+        try {
+          while (!stopped) {
+            const outcome = await this.drain({ maxRuns: 1 });
+            if (outcome.idle) {
+              break;
+            }
+          }
+        } catch (error) {
+          console.error("[@chimpbase/bun][worker]", error);
+        } finally {
+          running = false;
+        }
+      };
+
+      const scheduleTick = () => {
+        const runningTick = tick().finally(() => {
+          activeTicks.delete(runningTick);
+        });
+        activeTicks.add(runningTick);
+      };
+
+      scheduleTick();
+      const interval = setInterval(() => {
+        scheduleTick();
+      }, this.config.worker.pollIntervalMs);
+
+      return {
+        async stop() {
+          stopped = true;
+          clearInterval(interval);
+          await Promise.allSettled([...activeTicks]);
+        },
+      };
+    }
+
+    const lanes = this.createWorkerLanes();
+    const activeTicks = new Set<Promise<void>>();
+    const tickLane = async (lane: WorkerLane) => {
+      if (lane.running || stopped) {
         return;
       }
 
-      running = true;
+      lane.running = true;
       try {
         while (!stopped) {
-          const outcome = await this.drain({ maxRuns: 1 });
+          const outcome = await this.runWorkerLaneOperation(lane, async () => {
+            await this.syncCronSchedulesIfNeeded();
+            return await lane.engine.drain({ maxRuns: 1 });
+          });
+          this.debug("worker drain completed", {
+            cronSchedules: outcome.cronSchedules,
+            lane: lane.id,
+            queueJobs: outcome.queueJobs,
+            runs: outcome.runs,
+            stopReason: outcome.stopReason,
+          });
           if (outcome.idle) {
             break;
           }
@@ -572,19 +664,31 @@ export class ChimpbaseBunHost {
       } catch (error) {
         console.error("[@chimpbase/bun][worker]", error);
       } finally {
-        running = false;
+        lane.running = false;
       }
     };
 
-    void tick();
+    const scheduleTick = (lane: WorkerLane) => {
+      const runningTick = tickLane(lane).finally(() => {
+        activeTicks.delete(runningTick);
+      });
+      activeTicks.add(runningTick);
+    };
+
+    for (const lane of lanes) {
+      scheduleTick(lane);
+    }
     const interval = setInterval(() => {
-      void tick();
+      for (const lane of lanes) {
+        scheduleTick(lane);
+      }
     }, this.config.worker.pollIntervalMs);
 
     return {
-      stop() {
+      async stop() {
         stopped = true;
         clearInterval(interval);
+        await Promise.allSettled([...activeTicks]);
       },
     };
   }
@@ -605,6 +709,33 @@ export class ChimpbaseBunHost {
       .then(operation);
 
     this.serializedEngineOperations = queued.then(() => undefined, () => undefined);
+    return await queued;
+  }
+
+  private createWorkerLanes(): WorkerLane[] {
+    return Array.from({ length: this.getWorkerConcurrency() }, (_, index) => ({
+      engine: this.createWorkerEngine(),
+      id: index + 1,
+      running: false,
+      serializedOperations: Promise.resolve(),
+    }));
+  }
+
+  private getWorkerConcurrency(): number {
+    const configured = Math.max(1, Math.floor(this.config.worker.concurrency));
+    if (!this.supportsConcurrentWorkers) {
+      return 1;
+    }
+
+    return configured;
+  }
+
+  private async runWorkerLaneOperation<TResult>(lane: WorkerLane, operation: () => Promise<TResult>): Promise<TResult> {
+    const queued = lane.serializedOperations
+      .catch(() => undefined)
+      .then(operation);
+
+    lane.serializedOperations = queued.then(() => undefined, () => undefined);
     return await queued;
   }
 
@@ -681,6 +812,7 @@ function buildConfigFromApp(app: ChimpbaseAppDefinition): ChimpbaseProjectConfig
       persist: app.telemetry.persist,
     },
     worker: {
+      concurrency: inferNumberEnv("CHIMPBASE_WORKER_CONCURRENCY"),
       leaseMs: inferNumberEnv("CHIMPBASE_WORKER_LEASE_MS"),
       maxAttempts: app.worker.maxAttempts,
       pollIntervalMs: inferNumberEnv("CHIMPBASE_WORKER_POLL_INTERVAL_MS"),
@@ -740,7 +872,7 @@ async function openStorage(
   inlineMigrations: readonly ChimpbaseMigration[],
   migrationSource: ChimpbaseMigrationSource,
   migrationsSql: string[],
-): Promise<{ adapter: ChimpbaseEngineAdapter; eventBus?: ChimpbaseEventBus; storage: StorageHandle }> {
+): Promise<StorageResources> {
   const resolvedMigrations = [
     ...await migrationSource.list(),
     ...inlineMigrations,
@@ -753,13 +885,16 @@ async function openStorage(
     await ensurePostgresInternalTables(pool);
     const eventBus = new PostgresPollingEventBus({ pool });
     return {
-      adapter: createPostgresEngineAdapter(pool, platform),
+      createAdapter() {
+        return createPostgresEngineAdapter(pool, platform);
+      },
       eventBus,
       storage: {
         close() {
           return pool.end();
         },
       },
+      supportsConcurrentWorkers: true,
     };
   }
 
@@ -768,12 +903,15 @@ async function openStorage(
   await applyInlineSqlMigrations(db, migrationsSql);
   await ensureSqliteInternalTables(db);
   return {
-    adapter: createSqliteEngineAdapter(db, platform),
+    createAdapter() {
+      return createSqliteEngineAdapter(db, platform);
+    },
     storage: {
       close() {
         db.close();
       },
     },
+    supportsConcurrentWorkers: false,
   };
 }
 
@@ -794,6 +932,33 @@ function createStaticMigrationSource(migrations: readonly ChimpbaseMigration[]):
     async list(): Promise<ChimpbaseMigration[]> {
       return [...migrations];
     },
+  };
+}
+
+function cloneRegistryForWorkerEngine(source: ChimpbaseRegistry): ChimpbaseRegistry {
+  return {
+    actions: new Map(source.actions),
+    crons: new Map(source.crons),
+    httpHandler: source.httpHandler,
+    subscriptions: new Map(
+      [...source.subscriptions.entries()].map(([eventName, entries]) => [eventName, [...entries]]),
+    ),
+    telemetryOverrides: new Map(source.telemetryOverrides),
+    workers: new Map(
+      [...source.workers.entries()]
+        .filter(([name]) => !RESERVED_ENGINE_QUEUE_NAMES.has(name))
+        .map(([name, registration]) => [
+          name,
+          {
+            definition: { ...registration.definition },
+            handler: registration.handler,
+            name: registration.name,
+          },
+        ]),
+    ),
+    workflows: new Map(
+      [...source.workflows.entries()].map(([name, versions]) => [name, new Map(versions)]),
+    ),
   };
 }
 

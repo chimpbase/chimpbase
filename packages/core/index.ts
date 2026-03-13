@@ -46,6 +46,7 @@ export interface ChimpbaseProjectConfig {
     retention: { enabled: boolean; maxAgeDays: number; schedule: string };
   };
   worker: {
+    concurrency: number;
     leaseMs: number;
     maxAttempts: number;
     pollIntervalMs: number;
@@ -78,6 +79,7 @@ export interface ChimpbaseProjectConfigInput {
     };
   };
   worker?: {
+    concurrency?: number;
     leaseMs?: number;
     maxAttempts?: number;
     pollIntervalMs?: number;
@@ -238,6 +240,7 @@ export function normalizeProjectConfig(
       },
     },
     worker: {
+      concurrency: input.worker?.concurrency ?? 1,
       leaseMs: input.worker?.leaseMs ?? 30_000,
       maxAttempts: input.worker?.maxAttempts ?? 5,
       pollIntervalMs: input.worker?.pollIntervalMs ?? 250,

@@ -22,6 +22,7 @@ interface LoadTestOptions {
   steadyRatePerSecond: number;
   storage: StorageEngine;
   warmup: number;
+  workerConcurrency: number;
 }
 
 interface QueueJobPayload {
@@ -267,6 +268,7 @@ async function createLoadTestHost(options: LoadTestOptions) {
         ? { engine: "postgres", url: requireDatabaseUrl(options) }
         : { engine: "sqlite", path: sqlitePath },
     workerRuntime: {
+      concurrency: options.workerConcurrency,
       pollIntervalMs: options.pollIntervalMs,
     },
   });
@@ -572,6 +574,7 @@ export function parseArgs(argv: string[]): LoadTestOptions {
     steadyRatePerSecond: parseInteger(values.get("steady-rate"), 50),
     storage: storage === "memory" || storage === "postgres" || storage === "sqlite" ? storage : "sqlite",
     warmup: parseInteger(values.get("warmup"), 200),
+    workerConcurrency: parseInteger(values.get("worker-concurrency"), 1),
   };
 }
 
@@ -644,7 +647,7 @@ function requireDatabaseUrl(options: Pick<LoadTestOptions, "databaseUrl" | "stor
 function printHeader(options: LoadTestOptions): void {
   console.log("Chimpbase Single-Process Load Test");
   console.log(`mode=${options.mode} storage=${options.storage} iterations=${options.iterations} warmup=${options.warmup} concurrency=${options.concurrency} payloadBytes=${options.payloadBytes}`);
-  console.log(`pollIntervalMs=${options.pollIntervalMs} headroom=${formatNumber(options.headroom)} steadyRate=${options.steadyRatePerSecond} steadyDurationMs=${options.steadyDurationMs}`);
+  console.log(`pollIntervalMs=${options.pollIntervalMs} workerConcurrency=${options.workerConcurrency} headroom=${formatNumber(options.headroom)} steadyRate=${options.steadyRatePerSecond} steadyDurationMs=${options.steadyDurationMs}`);
   console.log("");
 }
 
