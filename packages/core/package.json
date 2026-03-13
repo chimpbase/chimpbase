@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/core",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Core engine, registry and execution model for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -33,7 +33,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@chimpbase/runtime": "0.1.19",
+    "@chimpbase/runtime": "0.1.20",
     "kysely": "^0.28.11"
   }
 }
