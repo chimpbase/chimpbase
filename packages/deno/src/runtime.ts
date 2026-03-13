@@ -126,6 +126,7 @@ export interface CreateHostOptions {
 }
 
 const IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX = "_chimpbase.sub.seen:";
+const POSTGRES_WORKER_QUEUE_BATCH_SIZE = 8;
 const RESERVED_ENGINE_QUEUE_NAMES = new Set(["__chimpbase.cron.run", "__chimpbase.workflow.run"]);
 
 export class ChimpbaseDenoHost {
@@ -647,7 +648,15 @@ export class ChimpbaseDenoHost {
         while (!stopped) {
           const outcome = await this.runWorkerLaneOperation(lane, async () => {
             await this.syncCronSchedulesIfNeeded();
-            return await lane.engine.drain({ maxRuns: 1 });
+            const scheduled = await lane.engine.processNextCronSchedule();
+            const queueJobs = await lane.engine.processNextQueueJobs(this.getWorkerQueueBatchSize());
+            return {
+              cronSchedules: scheduled ? 1 : 0,
+              idle: !scheduled && queueJobs.length === 0,
+              queueJobs: queueJobs.length,
+              runs: (scheduled ? 1 : 0) + queueJobs.length,
+              stopReason: !scheduled && queueJobs.length === 0 ? "idle" : "max_runs",
+            } satisfies DrainResult;
           });
           this.debug("worker drain completed", {
             cronSchedules: outcome.cronSchedules,
@@ -727,6 +736,18 @@ export class ChimpbaseDenoHost {
     }
 
     return configured;
+  }
+
+  private getWorkerQueueBatchSize(): number {
+    if (!this.supportsConcurrentWorkers) {
+      return 1;
+    }
+
+    if (this.getWorkerConcurrency() > 1) {
+      return 1;
+    }
+
+    return POSTGRES_WORKER_QUEUE_BATCH_SIZE;
   }
 
   private async runWorkerLaneOperation<TResult>(lane: WorkerLane, operation: () => Promise<TResult>): Promise<TResult> {

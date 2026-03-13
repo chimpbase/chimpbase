@@ -340,6 +340,44 @@ export function createPostgresEngineAdapter(
       );
       return result.rows[0] ?? null;
     },
+    async claimNextQueueJobs(leaseMs: number, limit: number): Promise<ChimpbaseQueueJobRecord[]> {
+      const now = platform.now();
+      const leaseExpiresAtMs = now + leaseMs;
+      const batchSize = Math.max(1, Math.floor(limit));
+      const result = await queryable().query<ChimpbaseQueueJobRecord>(
+        `
+          WITH candidate AS (
+            SELECT id
+            FROM _chimpbase_queue_jobs
+            WHERE (
+              status = 'pending' AND available_at_ms <= $1
+            ) OR (
+              status = 'processing' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms <= $1
+            )
+            ORDER BY id ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT $3
+          ),
+          updated AS (
+            UPDATE _chimpbase_queue_jobs q
+            SET
+              status = 'processing',
+              attempt_count = q.attempt_count + 1,
+              lease_expires_at_ms = $2,
+              updated_at = NOW()
+            FROM candidate
+            WHERE q.id = candidate.id
+            RETURNING q.id, q.queue_name, q.payload_json::text, q.attempt_count
+          )
+          SELECT id, queue_name, payload_json, attempt_count
+          FROM updated
+          ORDER BY id ASC
+        `,
+        [now, leaseExpiresAtMs, batchSize],
+      );
+
+      return result.rows;
+    },
     async collectionDelete(name: string, filter: ChimpbaseCollectionFilter = {}): Promise<number> {
       const matched = await findCollectionDocuments(queryable(), name, filter);
       for (const row of matched) {

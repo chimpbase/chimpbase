@@ -176,6 +176,7 @@ export interface ChimpbaseEngineAdapter {
   beginTransaction(): Promise<void>;
   claimNextCronSchedule(leaseMs: number): Promise<ClaimedCronScheduleRow | null>;
   claimNextQueueJob(leaseMs: number): Promise<ChimpbaseQueueJobRecord | null>;
+  claimNextQueueJobs?(leaseMs: number, limit: number): Promise<ChimpbaseQueueJobRecord[]>;
   collectionDelete(name: string, filter?: ChimpbaseCollectionFilter): Promise<number>;
   collectionFind<TDocument = Record<string, unknown>>(
     name: string,
@@ -413,12 +414,34 @@ export class ChimpbaseEngine {
   }
 
   async processNextQueueJob(): Promise<ChimpbaseQueueExecutionResult | null> {
-    const telemetryStart = this.telemetryRecords.length;
-    const job = await this.adapter.claimNextQueueJob(this.worker.leaseMs);
-    if (!job) {
-      return null;
+    const [job] = await this.processNextQueueJobs(1);
+    return job ?? null;
+  }
+
+  async processNextQueueJobs(limit: number): Promise<ChimpbaseQueueExecutionResult[]> {
+    const batchSize = Math.max(1, Math.floor(limit));
+    const jobs = this.adapter.claimNextQueueJobs
+      ? await this.adapter.claimNextQueueJobs(this.worker.leaseMs, batchSize)
+      : [];
+    const claimedJobs = jobs.length > 0
+      ? jobs
+      : await this.claimSingleQueueJob();
+
+    const results: ChimpbaseQueueExecutionResult[] = [];
+    for (const job of claimedJobs) {
+      results.push(await this.processClaimedQueueJob(job));
     }
 
+    return results;
+  }
+
+  private async claimSingleQueueJob(): Promise<ChimpbaseQueueJobRecord[]> {
+    const job = await this.adapter.claimNextQueueJob(this.worker.leaseMs);
+    return job ? [job] : [];
+  }
+
+  private async processClaimedQueueJob(job: ChimpbaseQueueJobRecord): Promise<ChimpbaseQueueExecutionResult> {
+    const telemetryStart = this.telemetryRecords.length;
     const worker = this.registry.workers.get(job.queue_name);
     if (!worker) {
       await this.failQueueJob(job.id, job.queue_name, `queue handler not found: ${job.queue_name}`, job.attempt_count);
