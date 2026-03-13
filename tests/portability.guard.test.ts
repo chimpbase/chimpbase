@@ -82,6 +82,25 @@ describe("portable package guards", () => {
       "NOTICE",
     ]);
   });
+
+  test("published packages do not use workspace protocol for internal runtime dependencies", async () => {
+    const packageDirs = ["bun", "core", "deno", "postgres", "runtime", "tooling"] as const;
+    const violations: string[] = [];
+
+    for (const packageName of packageDirs) {
+      const manifest = JSON.parse(
+        await readFile(resolve(repoRoot, `packages/${packageName}/package.json`), "utf8"),
+      ) as { dependencies?: Record<string, string> };
+
+      for (const [dependency, version] of Object.entries(manifest.dependencies ?? {})) {
+        if (dependency.startsWith("@chimpbase/") && version.startsWith("workspace:")) {
+          violations.push(`packages/${packageName}/package.json: ${dependency} -> ${version}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
 });
 
 function stripComments(source: string): string {
