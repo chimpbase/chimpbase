@@ -291,16 +291,16 @@ const createCustomer = action({
   name: "createCustomer",
 });
 
-await ctx.action(createCustomer, {
+await createCustomer({
   email: "alice@example.com",
   name: "Alice",
   plan: "pro",
 });
 ```
 
-The action ref carries input and return types, while the runtime keeps the serializable action name for workflows, CLI execution and persistence.
+Inside an active chimpbase runtime scope, the action ref is directly callable. The runtime still keeps the serializable action name for workflows, CLI execution and persistence.
 
-`action("name", handler)` still works for tuple-style internal handlers and compatibility with older code.
+`ctx.action(...)` still works when you want explicit dispatch or dynamic references. `action("name", handler)` also still works for tuple-style internal handlers and compatibility with older code.
 
 ## Quick start
 
@@ -503,7 +503,7 @@ const onboarding = workflow({
   },
   async run(wf) {
     if (wf.state.phase === "provision") {
-      await wf.action(provisionCustomer, { customerId: wf.state.customerId });
+      await provisionCustomer({ customerId: wf.state.customerId });
       return wf.transition({
         ...wf.state,
         phase: "waiting_kickoff",

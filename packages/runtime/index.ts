@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Kysely } from "kysely";
 
 export type ChimpbaseRow = Record<string, unknown>;
@@ -581,11 +582,17 @@ export type ChimpbaseTelemetryPersistOption =
   | boolean
   | { log?: boolean; metric?: boolean; trace?: boolean };
 
+export type ChimpbaseActionInvoker = <TResult = unknown>(
+  nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
+  args: unknown[],
+) => Promise<TResult>;
+
 export interface ChimpbaseActionRegistration<
   TArgs = unknown[],
   TResult = unknown,
   TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry,
 > {
+  (...args: ChimpbaseActionCallArgs<TArgs>): Promise<TResult>;
   args?: ChimpbaseValidator<TArgs>;
   kind: "action";
   handler: ChimpbaseActionHandler<TArgs, TResult, TActions>;
@@ -685,6 +692,8 @@ interface ChimpbaseLegacyDecoratedEntry {
 
 const decoratedEntryStore = new WeakMap<ChimpbaseDecoratedOwner, ChimpbaseAnyRegistration[]>();
 const legacyDecoratedEntryStore = new WeakMap<ChimpbaseDecoratedOwner, ChimpbaseLegacyDecoratedEntry[]>();
+const ACTION_INVOKER_STORAGE_KEY = Symbol.for("@chimpbase/runtime.action_invoker_storage");
+const actionInvokerStorage = getActionInvokerStorage();
 
 type RuntimeGlobals = typeof globalThis & {
   defineAction?: <TArgs extends unknown[] = unknown[], TResult = unknown>(
@@ -712,6 +721,13 @@ type RuntimeGlobals = typeof globalThis & {
 
 interface ChimpbaseActionOptions {
   telemetry?: ChimpbaseTelemetryPersistOption;
+}
+
+export function runWithActionInvoker<TResult>(
+  invoker: ChimpbaseActionInvoker,
+  callback: () => TResult | Promise<TResult>,
+): TResult | Promise<TResult> {
+  return actionInvokerStorage.run(invoker, callback);
 }
 
 interface ChimpbaseActionDefinitionInput<
@@ -757,31 +773,31 @@ export function action<TArgs = unknown[], TResult = unknown, TActions extends Ch
 ): ChimpbaseActionRegistration<TArgs, TResult, TActions> {
   if (typeof inputOrName !== "string") {
     const definition = inputOrName;
-    return {
+    return createActionRegistration({
       args: "args" in definition ? definition.args : undefined,
       handler: definition.handler as ChimpbaseActionHandler<TArgs, TResult, TActions>,
       kind: "action",
       name: definition.name,
       telemetry: definition.telemetry,
-    };
+    });
   }
 
   if (isActionRegistration(handler)) {
-    return {
+    return createActionRegistration({
       args: handler.args,
       handler: handler.handler as ChimpbaseActionHandler<TArgs, TResult, TActions>,
       kind: "action",
       name: inputOrName,
       telemetry: options?.telemetry ?? handler.telemetry,
-    };
+    });
   }
 
-  return {
+  return createActionRegistration({
     handler: handler as ChimpbaseActionHandler<TArgs, TResult, TActions>,
     kind: "action",
     name: inputOrName,
     telemetry: options?.telemetry,
-  };
+  });
 }
 
 export function subscription<TPayload = unknown, TResult = unknown>(
@@ -1489,11 +1505,75 @@ export const v = {
 function isActionRegistration(value: unknown): value is ChimpbaseActionRegistration<any, any, any> {
   return Boolean(
     value
-      && typeof value === "object"
+      && (typeof value === "object" || typeof value === "function")
       && (value as { kind?: unknown }).kind === "action"
       && typeof (value as { name?: unknown }).name === "string"
       && "handler" in (value as object),
   );
+}
+
+function getActionInvokerStorage(): AsyncLocalStorage<ChimpbaseActionInvoker> {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    [ACTION_INVOKER_STORAGE_KEY]?: AsyncLocalStorage<ChimpbaseActionInvoker>;
+  };
+
+  if (!runtimeGlobals[ACTION_INVOKER_STORAGE_KEY]) {
+    runtimeGlobals[ACTION_INVOKER_STORAGE_KEY] = new AsyncLocalStorage<ChimpbaseActionInvoker>();
+  }
+
+  return runtimeGlobals[ACTION_INVOKER_STORAGE_KEY];
+}
+
+function createActionRegistration<
+  TArgs = unknown[],
+  TResult = unknown,
+  TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry,
+>(
+  registration: {
+    args?: ChimpbaseValidator<TArgs>;
+    handler: ChimpbaseActionHandler<TArgs, TResult, TActions>;
+    kind: "action";
+    name: string;
+    telemetry?: ChimpbaseTelemetryPersistOption;
+  },
+): ChimpbaseActionRegistration<TArgs, TResult, TActions> {
+  const callable = (async (...args: ChimpbaseActionCallArgs<TArgs>): Promise<TResult> => {
+    const invoker = actionInvokerStorage.getStore();
+    if (!invoker) {
+      throw new Error(
+        `action ${registration.name} requires an active chimpbase runtime context; use ctx.action(${registration.name}, ...) or host.executeAction(${registration.name}, ...)`,
+      );
+    }
+
+    return await invoker<TResult>(callable, args as unknown[]);
+  }) as ChimpbaseActionRegistration<TArgs, TResult, TActions>;
+
+  defineRegistrationProperty(callable, "kind", registration.kind);
+  defineRegistrationProperty(callable, "name", registration.name);
+  defineRegistrationProperty(callable, "handler", registration.handler);
+
+  if (registration.args !== undefined) {
+    defineRegistrationProperty(callable, "args", registration.args);
+  }
+
+  if (registration.telemetry !== undefined) {
+    defineRegistrationProperty(callable, "telemetry", registration.telemetry);
+  }
+
+  return callable;
+}
+
+function defineRegistrationProperty<TTarget extends object, TKey extends keyof any>(
+  target: TTarget,
+  key: TKey,
+  value: unknown,
+): void {
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: false,
+  });
 }
 
 function registerDecoratedMethod(

@@ -15,13 +15,36 @@ It also exports the public context and durable workflow contracts that hosts con
 ## Typical usage
 
 ```ts
-import { action, cron, worker, register } from "@chimpbase/runtime";
+import { action, cron, v, worker } from "@chimpbase/runtime";
 
-chimpbase.register(
-  action("createCustomer", async (ctx, input) => {
+const createCustomer = action({
+  args: v.object({
+    email: v.string(),
+    name: v.string(),
+  }),
+  async handler(ctx, input) {
     await ctx.queue.enqueue("customer.sync", input);
     return { ok: true };
-  }),
+  },
+  name: "createCustomer",
+});
+
+const seedCustomers = action({
+  args: v.array(
+    v.object({
+      email: v.string(),
+      name: v.string(),
+    }),
+  ),
+  async handler(_ctx, input) {
+    return await Promise.all(input.map((customer) => createCustomer(customer)));
+  },
+  name: "seedCustomers",
+});
+
+chimpbase.register(
+  createCustomer,
+  seedCustomers,
   cron("customer.rollup", "0 * * * *", async (ctx, invocation) => {
     await ctx.collection.insert("customer_rollups", {
       capturedAt: invocation.fireAt,
@@ -33,6 +56,8 @@ chimpbase.register(
   }),
 );
 ```
+
+Inside an active chimpbase runtime scope, action refs are directly callable, so one action can invoke another with `await createCustomer(input)`.
 
 ## Per-handler telemetry persistence
 

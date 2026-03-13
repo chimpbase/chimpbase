@@ -2,6 +2,7 @@ import type { Kysely } from "kysely";
 
 import type {
   ChimpbaseActionRegistration,
+  ChimpbaseActionInvoker,
   ChimpbaseCollectionFilter,
   ChimpbaseCollectionFindOptions,
   ChimpbaseCollectionPatch,
@@ -28,6 +29,7 @@ import type {
   ChimpbaseWorkflowStepsDraftDefinition,
   ChimpbaseWorkflowStepDefinition,
 } from "@chimpbase/runtime";
+import { runWithActionInvoker } from "@chimpbase/runtime";
 
 import { computeNextCronFireTime } from "./cron.ts";
 import { NoopEventBus, type ChimpbaseEventBus } from "./event-bus.ts";
@@ -326,7 +328,7 @@ export class ChimpbaseEngine {
     const telemetryStart = this.telemetryRecords.length;
     const routeEnv = this.createRouteEnv();
     const response = this.registry.httpHandler
-      ? await this.registry.httpHandler(request, routeEnv)
+      ? await this.runWithActionInvoker(async () => await this.registry.httpHandler!(request, routeEnv))
       : null;
 
     const emittedEvents = this.takeCommittedEvents();
@@ -426,7 +428,9 @@ export class ChimpbaseEngine {
     try {
       const payload = JSON.parse(job.payload_json) as unknown;
       await this.runInTransaction(async () => {
-        await worker.handler(this.createContext({ kind: "queue", name: job.queue_name }), payload);
+        await this.runWithActionInvoker(async () => {
+          await worker.handler(this.createContext({ kind: "queue", name: job.queue_name }), payload);
+        });
       });
 
       const emittedEvents = this.takeCommittedEvents();
@@ -612,10 +616,10 @@ export class ChimpbaseEngine {
       schedule: registration.schedule,
     };
 
-    await registration.handler(
-      this.createContext({ kind: "cron", name: payload.scheduleName }),
-      invocation,
-    );
+    await this.runWithActionInvoker(async () => await registration.handler(
+        this.createContext({ kind: "cron", name: payload.scheduleName }),
+        invocation,
+      ));
   }
 
   private createContext(scope: ChimpbaseExecutionScope): ChimpbaseContext {
@@ -941,13 +945,13 @@ export class ChimpbaseEngine {
       const state = JSON.parse(row.state_json) as unknown;
 
       if (hasWorkflowRun(definition)) {
-        const directive = await definition.run(
+        const directive = await this.runWithActionInvoker(async () => await definition.run(
           this.createWorkflowRunContext({
             input,
             state,
             workflowId,
           }),
-        );
+        ));
         const shouldContinue = await this.applyWorkflowRunDirective(workflowId, row, directive, input, state);
         if (shouldContinue) {
           continue;
@@ -1689,7 +1693,7 @@ export class ChimpbaseEngine {
       throw new Error(`action not found: ${name}`);
     }
 
-    return await this.runInTransaction(async () => {
+    return await this.runInTransaction(async () => await this.runWithActionInvoker(async () => {
       const context = this.createContext({ kind: "action", name });
       if (registration.args) {
         if (args.length > 1) {
@@ -1707,7 +1711,7 @@ export class ChimpbaseEngine {
         context,
         ...args,
       );
-    });
+    }));
   }
 
   private async dispatchSubscriptions(events: ChimpbaseEventRecord[]): Promise<void> {
@@ -1718,14 +1722,27 @@ export class ChimpbaseEngine {
           if (sub.idempotent && event.id !== undefined) {
             const key = `_chimpbase.sub.seen:${event.id}:${sub.name}`;
             if (await this.adapter.kvGet<boolean>(key)) return;
-            await sub.handler(this.createContext({ kind: "subscription", name: event.name }), event.payload);
+            await this.runWithActionInvoker(async () => {
+              await sub.handler(this.createContext({ kind: "subscription", name: event.name }), event.payload);
+            });
             await this.adapter.kvSet(key, true);
           } else {
-            await sub.handler(this.createContext({ kind: "subscription", name: event.name }), event.payload);
+            await this.runWithActionInvoker(async () => {
+              await sub.handler(this.createContext({ kind: "subscription", name: event.name }), event.payload);
+            });
           }
         });
       }
     }
+  }
+
+  private async runWithActionInvoker<TResult>(callback: () => TResult | Promise<TResult>): Promise<TResult> {
+    const invoker: ChimpbaseActionInvoker = async <TResult = unknown>(
+      nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
+      args: unknown[],
+    ): Promise<TResult> => await this.invokeAction<TResult>(nameOrReference, args);
+
+    return await runWithActionInvoker(invoker, callback);
   }
 
   private async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {

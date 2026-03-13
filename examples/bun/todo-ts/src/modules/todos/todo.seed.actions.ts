@@ -25,7 +25,7 @@ const seedDemoWorkspace = action({
 
     const seededProjects: ProjectRecord[] = [];
     for (const projectInput of projects) {
-      seededProjects.push(await ctx.action(createProject, projectInput));
+      seededProjects.push(await createProject(projectInput));
     }
 
     const todos: CreateTodoInput[] = [
@@ -86,7 +86,7 @@ const seedDemoWorkspace = action({
         continue;
       }
 
-      createdTodos.push(await ctx.action(createTodo, todoInput));
+      createdTodos.push(await createTodo(todoInput));
     }
 
     return {

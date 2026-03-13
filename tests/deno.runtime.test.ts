@@ -266,10 +266,10 @@ if (!dockerAvailable) {
             }),
           ),
         }),
-        async handler(ctx, input) {
+        async handler(_ctx, input) {
           const created = [];
           for (const account of input.accounts) {
-            created.push(await ctx.action(createAccount, account));
+            created.push(await createAccount(account));
           }
 
           return {
@@ -459,15 +459,11 @@ if (!dockerAvailable) {
             },
             kind: "subscription",
           },
-          {
-            ...action("enqueueAudit", async (ctx, value) => {
-              ctx.pubsub.publish("audit.created", { value });
-              return { queued: value };
-            }),
-          },
-          {
-            ...action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),
-          },
+          action("enqueueAudit", async (ctx, value) => {
+            ctx.pubsub.publish("audit.created", { value });
+            return { queued: value };
+          }),
+          action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),
           {
             definition: undefined,
             handler: async (ctx, payload) => {

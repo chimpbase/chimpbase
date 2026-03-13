@@ -308,12 +308,15 @@ export class ChimpbaseDenoHost {
     handler: ChimpbaseActionHandler<any, any>,
     definition?: { args?: ChimpbaseValidator<any> },
   ): ChimpbaseActionHandler<any, any> {
-    this.registry.actions.set(name, {
-      args: definition?.args,
-      handler: handler as ChimpbaseActionHandler<any, any>,
-      kind: "action",
-      name,
-    });
+    const entry = definition?.args
+      ? createActionEntry({
+          args: definition.args,
+          handler: handler as ChimpbaseObjectActionHandler<any, any>,
+          name,
+        })
+      : createActionEntry(name, handler as ChimpbaseTupleActionHandler<any[], any>);
+
+    this.registry.actions.set(name, entry);
     return handler;
   }
 
