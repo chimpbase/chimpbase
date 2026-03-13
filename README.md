@@ -298,7 +298,7 @@ await createCustomer({
 });
 ```
 
-Inside an active chimpbase runtime scope, the action ref is directly callable. The runtime still keeps the serializable action name for workflows, CLI execution and persistence.
+Inside an active chimpbase runtime scope, or after the action has been registered on a host, the action ref is directly callable. The runtime still keeps the serializable action name for workflows, CLI execution and persistence.
 
 `ctx.action(...)` still works when you want explicit dispatch or dynamic references. `action("name", handler)` also still works for tuple-style internal handlers and compatibility with older code.
 

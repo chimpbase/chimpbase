@@ -232,15 +232,24 @@ describe("chimpbase-bun runtime", () => {
       name: "seedAccountsRef",
     });
 
-    host.register(createAccount, seedAccounts);
-
     try {
       await expect(
         createAccount({
           email: "outside@test.dev",
           name: "Outside",
         }),
-      ).rejects.toThrow("requires an active chimpbase runtime context");
+      ).rejects.toThrow("requires an active chimpbase runtime context or a registered host binding");
+
+      host.register(createAccount, seedAccounts);
+
+      await expect(createAccount({
+        email: "bound@test.dev",
+        name: "Bound",
+      })).resolves.toEqual({
+        email: "bound@test.dev",
+        name: "Bound",
+        slug: "bound",
+      });
 
       const seeded = await host.executeAction(seedAccounts, {
         accounts: [

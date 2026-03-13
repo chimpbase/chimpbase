@@ -547,6 +547,7 @@ export type ChimpbaseRouteHandler<TActions extends ChimpbaseActionMap = Chimpbas
 ) => Response | Promise<Response>;
 
 export interface ChimpbaseRegistrationTarget {
+  bindActionInvoker?(reference: ChimpbaseActionRegistration<any, any, any>): void;
   registerAction<TArgs extends unknown[] = unknown[], TResult = unknown>(
     name: string,
     handler: ChimpbaseTupleActionHandler<TArgs, TResult>,
@@ -693,6 +694,7 @@ interface ChimpbaseLegacyDecoratedEntry {
 const decoratedEntryStore = new WeakMap<ChimpbaseDecoratedOwner, ChimpbaseAnyRegistration[]>();
 const legacyDecoratedEntryStore = new WeakMap<ChimpbaseDecoratedOwner, ChimpbaseLegacyDecoratedEntry[]>();
 const ACTION_INVOKER_STORAGE_KEY = Symbol.for("@chimpbase/runtime.action_invoker_storage");
+const ACTION_REFERENCE_INVOKERS_KEY = Symbol.for("@chimpbase/runtime.action_reference_invokers");
 const actionInvokerStorage = getActionInvokerStorage();
 
 type RuntimeGlobals = typeof globalThis & {
@@ -728,6 +730,13 @@ export function runWithActionInvoker<TResult>(
   callback: () => TResult | Promise<TResult>,
 ): TResult | Promise<TResult> {
   return actionInvokerStorage.run(invoker, callback);
+}
+
+export function bindActionInvoker(
+  reference: ChimpbaseActionRegistration<any, any, any>,
+  invoker: ChimpbaseActionInvoker,
+): void {
+  getBoundActionInvokers().set(reference, invoker);
 }
 
 interface ChimpbaseActionDefinitionInput<
@@ -1052,6 +1061,7 @@ export function register(
   for (const entry of flattenChimpbaseEntries(entriesOrGroups)) {
     switch (entry.kind) {
       case "action":
+        target.bindActionInvoker?.(entry);
         if (entry.args) {
           target.registerAction(entry.name, entry.handler, { args: entry.args });
         } else {
@@ -1524,6 +1534,18 @@ function getActionInvokerStorage(): AsyncLocalStorage<ChimpbaseActionInvoker> {
   return runtimeGlobals[ACTION_INVOKER_STORAGE_KEY];
 }
 
+function getBoundActionInvokers(): WeakMap<ChimpbaseActionRegistration<any, any, any>, ChimpbaseActionInvoker> {
+  const runtimeGlobals = globalThis as typeof globalThis & {
+    [ACTION_REFERENCE_INVOKERS_KEY]?: WeakMap<ChimpbaseActionRegistration<any, any, any>, ChimpbaseActionInvoker>;
+  };
+
+  if (!runtimeGlobals[ACTION_REFERENCE_INVOKERS_KEY]) {
+    runtimeGlobals[ACTION_REFERENCE_INVOKERS_KEY] = new WeakMap();
+  }
+
+  return runtimeGlobals[ACTION_REFERENCE_INVOKERS_KEY];
+}
+
 function createActionRegistration<
   TArgs = unknown[],
   TResult = unknown,
@@ -1538,10 +1560,10 @@ function createActionRegistration<
   },
 ): ChimpbaseActionRegistration<TArgs, TResult, TActions> {
   const callable = (async (...args: ChimpbaseActionCallArgs<TArgs>): Promise<TResult> => {
-    const invoker = actionInvokerStorage.getStore();
+    const invoker = actionInvokerStorage.getStore() ?? getBoundActionInvokers().get(callable);
     if (!invoker) {
       throw new Error(
-        `action ${registration.name} requires an active chimpbase runtime context; use ctx.action(${registration.name}, ...) or host.executeAction(${registration.name}, ...)`,
+        `action ${registration.name} requires an active chimpbase runtime context or a registered host binding; use ctx.action(${registration.name}, ...) or host.executeAction(${registration.name}, ...)`,
       );
     }
 

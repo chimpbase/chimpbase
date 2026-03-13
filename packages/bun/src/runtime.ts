@@ -28,6 +28,7 @@ import {
 } from "@chimpbase/core";
 import {
   action as createActionEntry,
+  bindActionInvoker as bindActionReferenceInvoker,
   cron as createCronEntry,
   describeWorkflow,
   register as registerEntries,
@@ -326,6 +327,21 @@ export class ChimpbaseBunHost {
 
     this.registry.actions.set(name, entry);
     return handler;
+  }
+
+  bindActionInvoker(reference: ChimpbaseActionReference<any, any, any>): void {
+    bindActionReferenceInvoker(reference, async <TResult = unknown>(
+      nameOrReference: string | ChimpbaseActionReference<any, any, any>,
+      args: unknown[],
+    ): Promise<TResult> => {
+      if (typeof nameOrReference === "string") {
+        const outcome = await this.executeAction(nameOrReference, args);
+        return outcome.result as TResult;
+      }
+
+      const outcome = await this.executeAction(nameOrReference, ...(args as unknown[]));
+      return outcome.result as TResult;
+    });
   }
 
   registerSubscription<TPayload = unknown, TResult = unknown>(

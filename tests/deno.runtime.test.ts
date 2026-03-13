@@ -280,9 +280,25 @@ if (!dockerAvailable) {
         name: "seedDenoAccountsRef",
       });
 
-      host.register(createAccount, seedAccounts);
-
       try {
+        await expect(
+          createAccount({
+            email: "outside@deno.test",
+            name: "Outside",
+          }),
+        ).rejects.toThrow("requires an active chimpbase runtime context or a registered host binding");
+
+        host.register(createAccount, seedAccounts);
+
+        await expect(createAccount({
+          email: "bound@deno.test",
+          name: "Bound",
+        })).resolves.toEqual({
+          email: "bound@deno.test",
+          name: "Bound",
+          slug: "bound",
+        });
+
         const seeded = await host.executeAction(seedAccounts, {
           accounts: [
             { email: "alice@deno.test", name: "Alice" },
