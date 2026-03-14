@@ -91,7 +91,7 @@
     },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.1.24",
+      "version": "0.1.27",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
@@ -111,7 +111,7 @@
     },
     "packages/core": {
       "name": "@chimpbase/core",
-      "version": "0.1.24",
+      "version": "0.1.27",
       "dependencies": {
         "@chimpbase/runtime": "0.1.24",
         "kysely": "^0.28.11",
@@ -119,7 +119,7 @@
     },
     "packages/deno": {
       "name": "@chimpbase/deno",
-      "version": "0.1.24",
+      "version": "0.1.27",
       "dependencies": {
         "@chimpbase/core": "0.1.24",
         "@chimpbase/host": "0.1.24",
@@ -134,7 +134,7 @@
     },
     "packages/host": {
       "name": "@chimpbase/host",
-      "version": "0.1.24",
+      "version": "0.1.27",
       "dependencies": {
         "@chimpbase/core": "0.1.24",
         "@chimpbase/postgres": "0.1.24",
@@ -145,7 +145,7 @@
     },
     "packages/node": {
       "name": "@chimpbase/node",
-      "version": "0.1.24",
+      "version": "0.1.27",
       "bin": {
         "chimpbase-node": "./dist/src/cli.js",
       },
@@ -164,7 +164,7 @@
     },
     "packages/postgres": {
       "name": "@chimpbase/postgres",
-      "version": "0.1.24",
+      "version": "0.1.27",
       "dependencies": {
         "@chimpbase/core": "0.1.24",
         "@chimpbase/runtime": "0.1.24",
@@ -176,16 +176,23 @@
         "typescript": "^5.9.3",
       },
     },
+    "packages/rest-collections": {
+      "name": "@chimpbase/rest-collections",
+      "version": "0.1.27",
+      "dependencies": {
+        "@chimpbase/runtime": "0.1.27",
+      },
+    },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.1.24",
+      "version": "0.1.27",
       "dependencies": {
         "kysely": "^0.28.11",
       },
     },
     "packages/tooling": {
       "name": "@chimpbase/tooling",
-      "version": "0.1.24",
+      "version": "0.1.27",
       "dependencies": {
         "@chimpbase/core": "0.1.24",
         "@chimpbase/runtime": "0.1.24",
@@ -218,6 +225,8 @@
     "@chimpbase/node": ["@chimpbase/node@workspace:packages/node"],
 
     "@chimpbase/postgres": ["@chimpbase/postgres@workspace:packages/postgres"],
+
+    "@chimpbase/rest-collections": ["@chimpbase/rest-collections@workspace:packages/rest-collections"],
 
     "@chimpbase/runtime": ["@chimpbase/runtime@workspace:packages/runtime"],
 
