@@ -183,8 +183,12 @@ export interface ChimpbaseEngineAdapter {
   ): Promise<void>;
   beginTransaction(): Promise<void>;
   claimNextCronSchedule(leaseMs: number): Promise<ClaimedCronScheduleRow | null>;
-  claimNextQueueJob(leaseMs: number): Promise<ChimpbaseQueueJobRecord | null>;
-  claimNextQueueJobs?(leaseMs: number, limit: number): Promise<ChimpbaseQueueJobRecord[]>;
+  claimNextQueueJob(leaseMs: number, queueNames: readonly string[]): Promise<ChimpbaseQueueJobRecord | null>;
+  claimNextQueueJobs?(
+    leaseMs: number,
+    limit: number,
+    queueNames: readonly string[],
+  ): Promise<ChimpbaseQueueJobRecord[]>;
   collectionDelete(name: string, filter?: ChimpbaseCollectionFilter): Promise<number>;
   collectionFind<TDocument = Record<string, unknown>>(
     name: string,
@@ -472,12 +476,13 @@ export class ChimpbaseEngine {
 
   async processNextQueueJobs(limit: number): Promise<ChimpbaseQueueExecutionResult[]> {
     const batchSize = Math.max(1, Math.floor(limit));
+    const queueNames = this.getClaimableQueueNames();
     const jobs = this.adapter.claimNextQueueJobs
-      ? await this.adapter.claimNextQueueJobs(this.worker.leaseMs, batchSize)
+      ? await this.adapter.claimNextQueueJobs(this.worker.leaseMs, batchSize, queueNames)
       : [];
     const claimedJobs = jobs.length > 0
       ? jobs
-      : await this.claimSingleQueueJob();
+      : await this.claimSingleQueueJob(queueNames);
 
     const results: ChimpbaseQueueExecutionResult[] = [];
     for (const job of claimedJobs) {
@@ -487,9 +492,31 @@ export class ChimpbaseEngine {
     return results;
   }
 
-  private async claimSingleQueueJob(): Promise<ChimpbaseQueueJobRecord[]> {
-    const job = await this.adapter.claimNextQueueJob(this.worker.leaseMs);
+  private async claimSingleQueueJob(queueNames: readonly string[]): Promise<ChimpbaseQueueJobRecord[]> {
+    const job = await this.adapter.claimNextQueueJob(this.worker.leaseMs, queueNames);
     return job ? [job] : [];
+  }
+
+  private getClaimableQueueNames(): string[] {
+    const queueNames = [...this.registry.workers.keys()].filter((name) =>
+      name !== INTERNAL_CRON_QUEUE_NAME
+      && name !== INTERNAL_SUBSCRIPTION_QUEUE_NAME
+      && name !== INTERNAL_WORKFLOW_QUEUE_NAME
+    );
+
+    if (this.registry.crons.size > 0) {
+      queueNames.push(INTERNAL_CRON_QUEUE_NAME);
+    }
+
+    if (this.subscriptionsConfig.dispatch === "async" && this.registry.subscriptions.size > 0) {
+      queueNames.push(INTERNAL_SUBSCRIPTION_QUEUE_NAME);
+    }
+
+    if (this.registry.workflows.size > 0) {
+      queueNames.push(INTERNAL_WORKFLOW_QUEUE_NAME);
+    }
+
+    return queueNames;
   }
 
   private async processClaimedQueueJob(job: ChimpbaseQueueJobRecord): Promise<ChimpbaseQueueExecutionResult> {

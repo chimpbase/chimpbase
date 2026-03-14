@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 const repoRoot = resolve(import.meta.dir, "../../../../../");
 const sourceProjectDir = resolve(repoRoot, "examples/bun/todo-ts-decorators");
 const chimpbaseBunPackageDir = resolve(repoRoot, "packages/bun");
+const chimpbaseHostPackageDir = resolve(repoRoot, "packages/host");
 const chimpbasePostgresPackageDir = resolve(repoRoot, "packages/postgres");
 const chimpbaseToolingPackageDir = resolve(repoRoot, "packages/tooling");
 const workspaceNodeModulesDir = resolve(repoRoot, "node_modules");
@@ -86,6 +87,9 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
       recursive: true,
     });
     await cp(chimpbaseCorePackageDir, resolve(projectDir, "node_modules/@chimpbase/core"), {
+      recursive: true,
+    });
+    await cp(chimpbaseHostPackageDir, resolve(projectDir, "node_modules/@chimpbase/host"), {
       recursive: true,
     });
     await cp(resolve(chimpbaseBunPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/bun/src"), {

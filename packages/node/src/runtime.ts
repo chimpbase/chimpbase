@@ -38,6 +38,14 @@ import {
   PostgresPollingEventBus,
 } from "@chimpbase/postgres";
 
+import {
+  applyInlineSqlMigrations,
+  applySqlMigrations,
+  createSqliteEngineAdapter,
+  ensureSqliteInternalTables,
+  openSqliteDatabase,
+} from "./sqlite_node_adapter.ts";
+
 export interface NodeServeHandle {
   port: number;
   server: Server;
@@ -108,30 +116,44 @@ export const nodeRuntimeShim: ChimpbaseRuntimeShim<NodeServeHandle> = {
         ...inlineMigrations,
       ];
 
-      if (config.storage.engine !== "postgres") {
-        throw new Error("@chimpbase/node currently supports only postgres storage; configure storage.engine = 'postgres'");
+      if (config.storage.engine === "postgres") {
+        if (!config.storage.url) {
+          throw new Error("@chimpbase/node requires storage.url for postgres storage");
+        }
+
+        const pool = openPostgresPool(config);
+        await applyPostgresSqlMigrations(pool, resolvedMigrations.map((migration) => migration.sql));
+        await applyInlinePostgresMigrations(pool, migrationsSql);
+        await ensurePostgresInternalTables(pool);
+        const eventBus = new PostgresPollingEventBus({ pool });
+        return {
+          createAdapter() {
+            return createPostgresEngineAdapter(pool, platform);
+          },
+          eventBus,
+          storage: {
+            close() {
+              return pool.end();
+            },
+          },
+          supportsConcurrentWorkers: true,
+        };
       }
 
-      if (!config.storage.url) {
-        throw new Error("@chimpbase/node requires storage.url for postgres storage");
-      }
-
-      const pool = openPostgresPool(config);
-      await applyPostgresSqlMigrations(pool, resolvedMigrations.map((migration) => migration.sql));
-      await applyInlinePostgresMigrations(pool, migrationsSql);
-      await ensurePostgresInternalTables(pool);
-      const eventBus = new PostgresPollingEventBus({ pool });
+      const db = await openSqliteDatabase(_projectDir, config);
+      await applySqlMigrations(db, resolvedMigrations.map((migration) => migration.sql));
+      await applyInlineSqlMigrations(db, migrationsSql);
+      await ensureSqliteInternalTables(db);
       return {
         createAdapter() {
-          return createPostgresEngineAdapter(pool, platform);
+          return createSqliteEngineAdapter(db, platform);
         },
-        eventBus,
         storage: {
           close() {
-            return pool.end();
+            db.close();
           },
         },
-        supportsConcurrentWorkers: true,
+        supportsConcurrentWorkers: false,
       };
     },
   },

@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
-import { Database, type SQLQueryBindings } from "bun:sqlite";
 import type { CompiledQuery, Kysely, QueryResult } from "kysely";
 
 import type {
@@ -23,6 +23,25 @@ import type {
 
 import { createSqliteKysely } from "./kysely.ts";
 
+type SqliteBinding = unknown;
+
+interface SqliteRunResult {
+  changes: number;
+  lastInsertRowid?: bigint | number;
+}
+
+interface SqliteStatement {
+  readonly columnNames: string[];
+  all(...params: SqliteBinding[]): unknown[];
+  run(...params: SqliteBinding[]): SqliteRunResult;
+}
+
+interface SqliteDatabase {
+  close(): void;
+  exec(sql: string): unknown;
+  query(sql: string): SqliteStatement;
+}
+
 interface PersistedCollectionDocument {
   document_id: string;
   document_json: string;
@@ -37,7 +56,7 @@ interface PersistedCronScheduleRow {
 function buildSqliteQueueNameFilter(
   queueNames: readonly string[],
   startingParamIndex: number,
-): { params: SQLQueryBindings[]; sql: string } {
+): { params: SqliteBinding[]; sql: string } {
   if (queueNames.length === 0) {
     return { params: [], sql: "1 = 0" };
   }
@@ -51,29 +70,29 @@ function buildSqliteQueueNameFilter(
 export async function openSqliteDatabase(
   projectDir: string,
   config: ChimpbaseProjectConfig,
-): Promise<Database> {
+): Promise<SqliteDatabase> {
   if (config.storage.engine === "memory" || !config.storage.path || config.storage.path === ":memory:") {
-    return new Database(":memory:");
+    return createSqliteDatabase(new DatabaseSync(":memory:"));
   }
 
   const databasePath = resolve(projectDir, config.storage.path);
   await mkdir(dirname(databasePath), { recursive: true });
-  return new Database(databasePath);
+  return createSqliteDatabase(new DatabaseSync(databasePath));
 }
 
-export async function applySqlMigrations(db: Database, migrations: readonly string[]): Promise<void> {
+export async function applySqlMigrations(db: SqliteDatabase, migrations: readonly string[]): Promise<void> {
   for (const migration of migrations) {
     db.exec(migration);
   }
 }
 
-export async function applyInlineSqlMigrations(db: Database, migrations: string[]): Promise<void> {
+export async function applyInlineSqlMigrations(db: SqliteDatabase, migrations: string[]): Promise<void> {
   for (const migration of migrations) {
     db.exec(migration);
   }
 }
 
-export async function ensureSqliteInternalTables(db: Database): Promise<void> {
+export async function ensureSqliteInternalTables(db: SqliteDatabase): Promise<void> {
   db.exec(
     `
       CREATE TABLE IF NOT EXISTS _chimpbase_events (
@@ -140,20 +159,6 @@ export async function ensureSqliteInternalTables(db: Database): Promise<void> {
 
   db.exec(
     `
-      CREATE INDEX IF NOT EXISTS idx_chimpbase_queue_jobs_pending_due
-      ON _chimpbase_queue_jobs(status, available_at_ms, id);
-    `,
-  );
-
-  db.exec(
-    `
-      CREATE INDEX IF NOT EXISTS idx_chimpbase_queue_jobs_processing_due
-      ON _chimpbase_queue_jobs(status, lease_expires_at_ms, id);
-    `,
-  );
-
-  db.exec(
-    `
       CREATE TABLE IF NOT EXISTS _chimpbase_cron_schedules (
         schedule_name TEXT PRIMARY KEY,
         cron_expression TEXT NOT NULL,
@@ -163,13 +168,6 @@ export async function ensureSqliteInternalTables(db: Database): Promise<void> {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
-    `,
-  );
-
-  db.exec(
-    `
-      CREATE INDEX IF NOT EXISTS idx_chimpbase_cron_schedules_due
-      ON _chimpbase_cron_schedules(next_fire_at_ms, lease_expires_at_ms);
     `,
   );
 
@@ -199,23 +197,10 @@ export async function ensureSqliteInternalTables(db: Database): Promise<void> {
         last_error TEXT,
         lease_token TEXT,
         lease_expires_at_ms INTEGER,
+        completed_at TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        completed_at TEXT
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
-    `,
-  );
-
-  try {
-    db.exec("ALTER TABLE _chimpbase_workflow_instances ADD COLUMN current_step_id TEXT");
-  } catch {
-    // Column already exists on upgraded databases.
-  }
-
-  db.exec(
-    `
-      CREATE INDEX IF NOT EXISTS idx_chimpbase_workflow_instances_status
-      ON _chimpbase_workflow_instances(status, wake_at_ms);
     `,
   );
 
@@ -234,14 +219,68 @@ export async function ensureSqliteInternalTables(db: Database): Promise<void> {
 
   db.exec(
     `
-      CREATE INDEX IF NOT EXISTS idx_chimpbase_workflow_signals_pending
-      ON _chimpbase_workflow_signals(workflow_id, signal_name, consumed_at, id);
+      CREATE TABLE IF NOT EXISTS _chimpbase_logs (
+        id INTEGER PRIMARY KEY,
+        level TEXT NOT NULL,
+        message TEXT NOT NULL,
+        attributes_json TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
     `,
+  );
+
+  db.exec(
+    `
+      CREATE TABLE IF NOT EXISTS _chimpbase_metrics (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        value REAL NOT NULL,
+        attributes_json TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+  );
+
+  db.exec(
+    `
+      CREATE TABLE IF NOT EXISTS _chimpbase_traces (
+        id INTEGER PRIMARY KEY,
+        trace_id TEXT NOT NULL,
+        span_id TEXT NOT NULL,
+        parent_span_id TEXT,
+        name TEXT NOT NULL,
+        scope_kind TEXT,
+        scope_name TEXT,
+        started_at TEXT NOT NULL,
+        ended_at TEXT NOT NULL,
+        attributes_json TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+  );
+
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_chimpbase_stream_events_stream_id ON _chimpbase_stream_events (stream_name, id)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_chimpbase_queue_pending ON _chimpbase_queue_jobs (status, available_at_ms, id)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_chimpbase_queue_leased ON _chimpbase_queue_jobs (status, lease_expires_at_ms, id)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_chimpbase_logs_created_at ON _chimpbase_logs (created_at)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_chimpbase_metrics_created_at ON _chimpbase_metrics (created_at)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_chimpbase_traces_created_at ON _chimpbase_traces (created_at)",
   );
 }
 
 export function createSqliteEngineAdapter(
-  db: Database,
+  db: SqliteDatabase,
   platform: ChimpbasePlatformShim,
 ): ChimpbaseEngineAdapter {
   let kysely: Kysely<any> | null = null;
@@ -252,8 +291,8 @@ export function createSqliteEngineAdapter(
       fireAtMs: number,
       nextFireAtMs: number,
       leaseToken: string,
-    ) {
-      const result = db.query(
+    ): Promise<void> {
+      db.query(
         `
           UPDATE _chimpbase_cron_schedules
           SET
@@ -266,10 +305,6 @@ export function createSqliteEngineAdapter(
             AND lease_token = ?4
         `,
       ).run(nextFireAtMs, scheduleName, fireAtMs, leaseToken);
-
-      if (result.changes === 0) {
-        throw new Error(`cron schedule advance failed: ${scheduleName}`);
-      }
     },
     async beginTransaction() {
       db.exec("BEGIN IMMEDIATE");
@@ -304,7 +339,7 @@ export function createSqliteEngineAdapter(
           return null;
         }
 
-        const result = db.query(
+        db.query(
           `
             UPDATE _chimpbase_cron_schedules
             SET
@@ -312,19 +347,8 @@ export function createSqliteEngineAdapter(
               lease_expires_at_ms = ?2,
               updated_at = CURRENT_TIMESTAMP
             WHERE schedule_name = ?3
-              AND next_fire_at_ms = ?4
-              AND (
-                lease_token IS NULL
-                OR lease_expires_at_ms IS NULL
-                OR lease_expires_at_ms <= ?5
-              )
           `,
-        ).run(leaseToken, leaseExpiresAtMs, schedule.schedule_name, schedule.next_fire_at_ms, now);
-
-        if (result.changes === 0) {
-          db.exec("COMMIT");
-          return null;
-        }
+        ).run(leaseToken, leaseExpiresAtMs, schedule.schedule_name);
 
         db.exec("COMMIT");
         return {
@@ -707,7 +731,34 @@ export function createSqliteEngineAdapter(
   };
 }
 
-function runQuery<T>(db: Database, sql: string, params: SQLQueryBindings[]): T[] {
+function createSqliteDatabase(db: DatabaseSync): SqliteDatabase {
+  return {
+    close() {
+      db.close();
+    },
+    exec(sql: string) {
+      return db.exec(sql);
+    },
+    query(sql: string): SqliteStatement {
+      const statement = db.prepare(sql);
+      return {
+        columnNames: statement.columns().map((column) => column.name),
+        all(...params: SqliteBinding[]) {
+          return statement.all(...params as any[]);
+        },
+        run(...params: SqliteBinding[]) {
+          const result = statement.run(...params as any[]);
+          return {
+            changes: typeof result.changes === "bigint" ? Number(result.changes) : result.changes,
+            lastInsertRowid: result.lastInsertRowid,
+          };
+        },
+      };
+    },
+  };
+}
+
+function runQuery<T>(db: SqliteDatabase, sql: string, params: SqliteBinding[]): T[] {
   const statement = db.query(sql);
   if (statement.columnNames.length === 0) {
     statement.run(...params);
@@ -717,11 +768,11 @@ function runQuery<T>(db: Database, sql: string, params: SQLQueryBindings[]): T[]
   return statement.all(...params) as T[];
 }
 
-function toSqlBindings(params: readonly unknown[]): SQLQueryBindings[] {
-  return [...params] as SQLQueryBindings[];
+function toSqlBindings(params: readonly unknown[]): SqliteBinding[] {
+  return [...params];
 }
 
-function persistEvents(db: Database, events: ChimpbaseEventRecord[]): void {
+function persistEvents(db: SqliteDatabase, events: ChimpbaseEventRecord[]): void {
   if (events.length === 0) {
     return;
   }
@@ -736,7 +787,7 @@ function persistEvents(db: Database, events: ChimpbaseEventRecord[]): void {
 }
 
 function findCollectionDocuments(
-  db: Database,
+  db: SqliteDatabase,
   name: string,
   filter: ChimpbaseCollectionFilter = {},
   options?: ChimpbaseCollectionFindOptions,

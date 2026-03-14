@@ -34,5 +34,9 @@
     "packages/core/**/*.ts",
     "packages/runtime/**/*.ts",
     "examples/**/*.ts"
+  ],
+  "exclude": [
+    "**/dist/**",
+    "**/node_modules/**"
   ]
 }

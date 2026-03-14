@@ -113,6 +113,14 @@ All of them run on the same runtime and can share the same PostgreSQL storage st
 
 Chimpbase supports SQLite and memory for local development and tests.
 
+SQLite is available across the Bun, Deno and Node hosts. It is a good fit for:
+
+- local development
+- tests
+- isolated single-runtime deployments
+
+If multiple runtimes or containers need to coordinate through the same durable queue, subscription or workflow state, use PostgreSQL.
+
 But the default recommendation is: 
 
 > Just use PostgreSQL
@@ -221,4 +229,10 @@ For Deno:
 
 ```bash
 deno add npm:@chimpbase/deno
+```
+
+For Node:
+
+```bash
+npm install @chimpbase/node
 ```

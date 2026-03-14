@@ -309,7 +309,11 @@ export function createPostgresEngineAdapter(
 
       return result.rows[0] ?? null;
     },
-    async claimNextQueueJob(leaseMs: number): Promise<ChimpbaseQueueJobRecord | null> {
+    async claimNextQueueJob(leaseMs: number, queueNames: readonly string[]): Promise<ChimpbaseQueueJobRecord | null> {
+      if (queueNames.length === 0) {
+        return null;
+      }
+
       const now = platform.now();
       const leaseExpiresAtMs = now + leaseMs;
       const result = await queryable().query<ChimpbaseQueueJobRecord>(
@@ -317,11 +321,12 @@ export function createPostgresEngineAdapter(
           WITH candidate AS (
             SELECT id
             FROM _chimpbase_queue_jobs
-            WHERE (
-              status = 'pending' AND available_at_ms <= $1
-            ) OR (
-              status = 'processing' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms <= $1
-            )
+            WHERE queue_name = ANY($3::text[])
+              AND (
+                (status = 'pending' AND available_at_ms <= $1)
+                OR
+                (status = 'processing' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms <= $1)
+              )
             ORDER BY id ASC
             FOR UPDATE SKIP LOCKED
             LIMIT 1
@@ -336,11 +341,19 @@ export function createPostgresEngineAdapter(
           WHERE q.id = candidate.id
           RETURNING q.id, q.queue_name, q.payload_json::text, q.attempt_count
         `,
-        [now, leaseExpiresAtMs],
+        [now, leaseExpiresAtMs, queueNames],
       );
       return result.rows[0] ?? null;
     },
-    async claimNextQueueJobs(leaseMs: number, limit: number): Promise<ChimpbaseQueueJobRecord[]> {
+    async claimNextQueueJobs(
+      leaseMs: number,
+      limit: number,
+      queueNames: readonly string[],
+    ): Promise<ChimpbaseQueueJobRecord[]> {
+      if (queueNames.length === 0) {
+        return [];
+      }
+
       const now = platform.now();
       const leaseExpiresAtMs = now + leaseMs;
       const batchSize = Math.max(1, Math.floor(limit));
@@ -349,14 +362,15 @@ export function createPostgresEngineAdapter(
           WITH candidate AS (
             SELECT id
             FROM _chimpbase_queue_jobs
-            WHERE (
-              status = 'pending' AND available_at_ms <= $1
-            ) OR (
-              status = 'processing' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms <= $1
-            )
+            WHERE queue_name = ANY($3::text[])
+              AND (
+                (status = 'pending' AND available_at_ms <= $1)
+                OR
+                (status = 'processing' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms <= $1)
+              )
             ORDER BY id ASC
             FOR UPDATE SKIP LOCKED
-            LIMIT $3
+            LIMIT $4
           ),
           updated AS (
             UPDATE _chimpbase_queue_jobs q
@@ -373,7 +387,7 @@ export function createPostgresEngineAdapter(
           FROM updated
           ORDER BY id ASC
         `,
-        [now, leaseExpiresAtMs, batchSize],
+        [now, leaseExpiresAtMs, queueNames, batchSize],
       );
 
       return result.rows;

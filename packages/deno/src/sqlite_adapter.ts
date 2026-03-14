@@ -24,17 +24,6 @@ import { createSqliteKysely } from "./kysely.ts";
 
 type SqliteBinding = unknown;
 
-interface RawSqliteStatement {
-  all(params?: SqliteBinding[]): unknown[];
-  run(params?: SqliteBinding[]): SqliteRunResult | bigint | number | void;
-}
-
-interface RawSqliteDatabase {
-  close(): void;
-  exec(sql: string): unknown;
-  prepare(sql: string): RawSqliteStatement;
-}
-
 interface SqliteRunResult {
   changes: number;
   lastInsertRowid?: bigint | number;
@@ -52,6 +41,21 @@ interface SqliteDatabase {
   query(sql: string): SqliteStatement;
 }
 
+interface RawSqliteStatement {
+  columns(): Array<{ name: string }>;
+  all(...params: SqliteBinding[]): unknown[];
+  run(...params: SqliteBinding[]): {
+    changes: number | bigint;
+    lastInsertRowid?: bigint | number;
+  };
+}
+
+interface RawSqliteDatabase {
+  close(): void;
+  exec(sql: string): unknown;
+  prepare(sql: string): RawSqliteStatement;
+}
+
 interface PersistedCollectionDocument {
   document_id: string;
   document_json: string;
@@ -61,6 +65,20 @@ interface PersistedCronScheduleRow {
   cron_expression: string;
   next_fire_at_ms: number;
   schedule_name: string;
+}
+
+function buildSqliteQueueNameFilter(
+  queueNames: readonly string[],
+  startingParamIndex: number,
+): { params: SqliteBinding[]; sql: string } {
+  if (queueNames.length === 0) {
+    return { params: [], sql: "1 = 0" };
+  }
+
+  return {
+    params: [...queueNames],
+    sql: `queue_name IN (${queueNames.map((_, index) => `?${startingParamIndex + index}`).join(", ")})`,
+  };
 }
 
 export async function openSqliteDatabase(
@@ -357,9 +375,13 @@ export function createSqliteEngineAdapter(
         throw error;
       }
     },
-    async claimNextQueueJob(leaseMs: number): Promise<ChimpbaseQueueJobRecord | null> {
+    async claimNextQueueJob(
+      leaseMs: number,
+      queueNames: readonly string[],
+    ): Promise<ChimpbaseQueueJobRecord | null> {
       const now = platform.now();
       const leaseExpiresAtMs = now + leaseMs;
+      const queueFilter = buildSqliteQueueNameFilter(queueNames, 2);
 
       db.exec("BEGIN IMMEDIATE");
       try {
@@ -371,15 +393,16 @@ export function createSqliteEngineAdapter(
               payload_json,
               attempt_count
             FROM _chimpbase_queue_jobs
-            WHERE (
-              status = 'pending' AND available_at_ms <= ?1
-            ) OR (
-              status = 'processing' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms <= ?1
-            )
+            WHERE ${queueFilter.sql}
+              AND (
+                (status = 'pending' AND available_at_ms <= ?1)
+                OR
+                (status = 'processing' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms <= ?1)
+              )
             ORDER BY id ASC
             LIMIT 1
           `,
-        ).all(now) as ChimpbaseQueueJobRecord[];
+        ).all(now, ...queueFilter.params) as ChimpbaseQueueJobRecord[];
 
         if (!job) {
           db.exec("COMMIT");
@@ -730,21 +753,15 @@ function createSqliteDatabase(db: RawSqliteDatabase): SqliteDatabase {
     query(sql: string): SqliteStatement {
       const statement = db.prepare(sql);
       return {
-        reader: statementProducesRows(sql),
+        reader: statement.columns().length > 0 || statementProducesRows(sql),
         all(...params: SqliteBinding[]) {
-          return params.length === 0 ? statement.all() : statement.all(params);
+          return statement.all(...params as any[]);
         },
         run(...params: SqliteBinding[]) {
-          const result = params.length === 0 ? statement.run() : statement.run(params);
+          const result = statement.run(...params as any[]);
           return {
-            changes: typeof result === "object" && result && "changes" in result
-              ? Number(result.changes)
-              : typeof result === "bigint" || typeof result === "number"
-                ? Number(result)
-                : 0,
-            lastInsertRowid: typeof result === "object" && result && "lastInsertRowid" in result
-              ? result.lastInsertRowid
-              : undefined,
+            changes: typeof result.changes === "bigint" ? Number(result.changes) : result.changes,
+            lastInsertRowid: result.lastInsertRowid,
           };
         },
       };
@@ -753,11 +770,10 @@ function createSqliteDatabase(db: RawSqliteDatabase): SqliteDatabase {
 }
 
 async function loadSqliteDatabaseConstructor(): Promise<new (path: string) => RawSqliteDatabase> {
-  const specifier = "jsr:@db/sqlite";
-  const module = await import(specifier) as {
-    Database: new (path: string) => RawSqliteDatabase;
+  const module = await import("node:sqlite") as {
+    DatabaseSync: new (path: string) => RawSqliteDatabase;
   };
-  return module.Database;
+  return module.DatabaseSync;
 }
 
 function statementProducesRows(sql: string): boolean {

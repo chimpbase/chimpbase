@@ -211,6 +211,109 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
+    test("claims only queue names registered on each Postgres host", async () => {
+      const database = await postgres.createDatabase("named_queue_claim");
+      const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-postgres-named-queue-claim-"));
+      cleanupDirs.push(projectDir);
+
+      const migrationsSql = [
+        "CREATE TABLE IF NOT EXISTS customer_sync_audit (id BIGSERIAL PRIMARY KEY, customer_id BIGINT NOT NULL);",
+      ];
+
+      const publisher = await createChimpbase({
+        migrationsSql,
+        project: { name: "postgres-named-queue-publisher" },
+        projectDir,
+        storage: { engine: "postgres", url: database.url },
+      });
+      const subscriber = await createChimpbase({
+        migrationsSql,
+        project: { name: "postgres-named-queue-subscriber" },
+        projectDir,
+        storage: { engine: "postgres", url: database.url },
+        subscriptions: {
+          dispatch: "async",
+        },
+      });
+      const workerHost = await createChimpbase({
+        migrationsSql,
+        project: { name: "postgres-named-queue-worker" },
+        projectDir,
+        storage: { engine: "postgres", url: database.url },
+      });
+
+      publisher.registerAction("publishCustomerCreated", async (ctx, payload) => {
+        ctx.pubsub.publish("customer.created", payload as { customerId: number });
+        return null;
+      });
+      publisher.registerAction(
+        "listQueueJobs",
+        async (ctx) =>
+          await ctx.query(
+            "SELECT queue_name, attempt_count, status FROM _chimpbase_queue_jobs ORDER BY id ASC",
+          ),
+      );
+      publisher.registerAction(
+        "listCustomerSyncAudit",
+        async (ctx) =>
+          await ctx.query(
+            "SELECT customer_id::double precision AS customer_id FROM customer_sync_audit ORDER BY id ASC",
+          ),
+      );
+
+      subscriber.registerSubscription(
+        "customer.created",
+        async (ctx, payload) => {
+          await ctx.queue.enqueue("customer.sync", payload);
+        },
+        { name: "enqueueCustomerSync" },
+      );
+      workerHost.registerWorker("customer.sync", async (ctx, payload) => {
+        await ctx.query(
+          "INSERT INTO customer_sync_audit (customer_id) VALUES (?1)",
+          [(payload as { customerId: number }).customerId],
+        );
+      });
+
+      const startedSubscriber = subscriber.start({ runWorker: true, serve: false });
+      const startedWorker = workerHost.start({ runWorker: true, serve: false });
+
+      try {
+        await Bun.sleep(100);
+        await publisher.executeAction("publishCustomerCreated", [{ customerId: 7 }]);
+
+        const auditRows = await waitFor(async () => {
+          const outcome = await publisher.executeAction("listCustomerSyncAudit");
+          return outcome.result as Array<{ customer_id: number }>;
+        }, (rows) => rows.length === 1);
+        expect(auditRows).toEqual([{ customer_id: 7 }]);
+
+        const queueJobs = await waitFor(async () => {
+          const outcome = await publisher.executeAction("listQueueJobs");
+          return outcome.result as Array<{ attempt_count: number; queue_name: string; status: string }>;
+        }, (rows) => rows.some((row) => row.queue_name === "customer.sync" && row.status === "completed"));
+
+        expect(queueJobs).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            attempt_count: 1,
+            queue_name: "__chimpbase.subscription.run",
+            status: "completed",
+          }),
+          expect.objectContaining({
+            attempt_count: 1,
+            queue_name: "customer.sync",
+            status: "completed",
+          }),
+        ]));
+      } finally {
+        await startedSubscriber.stop();
+        await startedWorker.stop();
+        publisher.close();
+        subscriber.close();
+        workerHost.close();
+      }
+    }, 30000);
+
     test("executes ctx.db() via Kysely while keeping ctx.query() available", async () => {
       const database = await postgres.createDatabase("kysely");
       const projectDir = await createKyselyFixture("kysely", database.url);

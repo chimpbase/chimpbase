@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/bun",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "Bun host for building action-driven backends on Postgres with minimal boilerplate.",
   "license": "Apache-2.0",
   "type": "module",
@@ -38,11 +38,11 @@
     "access": "public"
   },
   "dependencies": {
-    "@chimpbase/core": "0.1.25",
-    "@chimpbase/host": "0.1.25",
-    "@chimpbase/postgres": "0.1.25",
-    "@chimpbase/runtime": "0.1.25",
-    "@chimpbase/tooling": "0.1.25",
+    "@chimpbase/core": "0.1.26",
+    "@chimpbase/host": "0.1.26",
+    "@chimpbase/postgres": "0.1.26",
+    "@chimpbase/runtime": "0.1.26",
+    "@chimpbase/tooling": "0.1.26",
     "kysely": "^0.28.11"
   },
   "devDependencies": {
