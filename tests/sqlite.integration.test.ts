@@ -20,6 +20,7 @@ import {
   createProjectFixture as createTodoTsFixture,
   startServer as startTodoTsServer,
 } from "../examples/bun/todo-ts/tests/support/runtime-harness.ts";
+import { installLocalPackage } from "./support/local_package.ts";
 
 const runtimeRoot = resolve(import.meta.dir, "..");
 const exampleDir = resolve(runtimeRoot, "examples/bun/todo-ts");
@@ -308,13 +309,8 @@ async function createRuntimeFixture(label: string): Promise<string> {
     ].join("\n"),
   );
   await writeFile(resolve(dir, "tsconfig.json"), await Bun.file(resolve(exampleDir, "tsconfig.json")).text());
-  await mkdir(resolve(dir, "node_modules/@chimpbase"), { recursive: true });
-  await cp(resolve(runtimeRoot, "packages/core"), resolve(dir, "node_modules/@chimpbase/core"), {
-    recursive: true,
-  });
-  await cp(resolve(runtimeRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
-    recursive: true,
-  });
+  await installLocalPackage(dir, "@chimpbase/core", resolve(runtimeRoot, "packages/core"));
+  await installLocalPackage(dir, "@chimpbase/runtime", resolve(runtimeRoot, "packages/runtime"));
   await cp(resolve(runtimeRoot, "node_modules/kysely"), resolve(dir, "node_modules/kysely"), {
     recursive: true,
   });
@@ -344,10 +340,7 @@ async function createKyselyFixture(label: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), `chimpbase-sqlite-kysely-${label}-`));
   cleanupDirs.push(dir);
 
-  await mkdir(resolve(dir, "node_modules/@chimpbase"), { recursive: true });
-  await cp(resolve(runtimeRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
-    recursive: true,
-  });
+  await installLocalPackage(dir, "@chimpbase/runtime", resolve(runtimeRoot, "packages/runtime"));
   await cp(resolve(runtimeRoot, "node_modules/kysely"), resolve(dir, "node_modules/kysely"), {
     recursive: true,
   });

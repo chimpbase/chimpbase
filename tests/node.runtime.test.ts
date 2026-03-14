@@ -5,6 +5,15 @@ import { tmpdir } from "node:os";
 
 const repoRoot = resolve(import.meta.dir, "..");
 const cleanupDirs: string[] = [];
+const nodeSupportsSqlite = Bun.spawnSync(
+  ["node", "--input-type=module", "-e", 'await import("node:sqlite");'],
+  {
+    cwd: repoRoot,
+    env: process.env,
+    stderr: "ignore",
+    stdout: "ignore",
+  },
+).exitCode === 0;
 
 afterEach(async () => {
   while (cleanupDirs.length > 0) {
@@ -16,7 +25,7 @@ afterEach(async () => {
 });
 
 describe("chimpbase-node runtime", () => {
-  test("supports sqlite storage in a real Node process", async () => {
+  (nodeSupportsSqlite ? test : test.skip)("supports sqlite storage in a real Node process", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-node-sqlite-"));
     cleanupDirs.push(projectDir);
 

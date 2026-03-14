@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import { syncChimpbaseWorkflowContracts } from "../packages/bun/src/library.ts";
+import { installLocalPackage } from "./support/local_package.ts";
 
 const runtimeRoot = resolve(import.meta.dir, "..");
 const cleanupDirs: string[] = [];
@@ -183,10 +184,7 @@ async function createWorkflowFixture(label: string, indexSource: string): Promis
   const dir = await mkdtemp(join(tmpdir(), `chimpbase-bun-workflow-contract-${label}-`));
   cleanupDirs.push(dir);
 
-  await mkdir(resolve(dir, "node_modules/@chimpbase"), { recursive: true });
-  await cp(resolve(runtimeRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
-    recursive: true,
-  });
+  await installLocalPackage(dir, "@chimpbase/runtime", resolve(runtimeRoot, "packages/runtime"));
   await cp(resolve(runtimeRoot, "node_modules/kysely"), resolve(dir, "node_modules/kysely"), {
     recursive: true,
   });

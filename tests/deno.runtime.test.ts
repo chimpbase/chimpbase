@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { access, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -17,6 +17,7 @@ import {
   startPostgresDocker,
   type PostgresDockerHandle,
 } from "../packages/tooling/src/postgres_docker.ts";
+import { installLocalPackage } from "./support/local_package.ts";
 
 interface FakeDenoRuntimeOptions {
   env?: Record<string, string>;
@@ -705,10 +706,7 @@ if (!dockerAvailable) {
         },
       });
 
-      await mkdir(resolve(projectDir, "node_modules/@chimpbase"), { recursive: true });
-      await cp(resolve(repoRoot, "packages/runtime"), resolve(projectDir, "node_modules/@chimpbase/runtime"), {
-        recursive: true,
-      });
+      await installLocalPackage(projectDir, "@chimpbase/runtime", resolve(repoRoot, "packages/runtime"));
 
       await writeFile(
         resolve(projectDir, "package.json"),
@@ -895,10 +893,7 @@ async function createDenoProjectFixture(label: string, databaseUrl: string): Pro
   const dir = await mkdtemp(join(tmpdir(), `chimpbase-deno-inline-${label}-`));
   cleanupDirs.push(dir);
 
-  await mkdir(resolve(dir, "node_modules/@chimpbase"), { recursive: true });
-  await cp(resolve(repoRoot, "packages/runtime"), resolve(dir, "node_modules/@chimpbase/runtime"), {
-    recursive: true,
-  });
+  await installLocalPackage(dir, "@chimpbase/runtime", resolve(repoRoot, "packages/runtime"));
 
   await writeFile(
     resolve(dir, "package.json"),
