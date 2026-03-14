@@ -89,14 +89,17 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
     recursive: true,
   });
   await cp(resolve(chimpbaseBunPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/bun/package.json"));
+  await copyDirectoryIfExists(resolve(chimpbaseBunPackageDir, "dist"), resolve(projectDir, "node_modules/@chimpbase/bun/dist"));
   await cp(resolve(chimpbasePostgresPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/postgres/src"), {
     recursive: true,
   });
   await cp(resolve(chimpbasePostgresPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/postgres/package.json"));
+  await copyDirectoryIfExists(resolve(chimpbasePostgresPackageDir, "dist"), resolve(projectDir, "node_modules/@chimpbase/postgres/dist"));
   await cp(resolve(chimpbaseToolingPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/tooling/src"), {
     recursive: true,
   });
   await cp(resolve(chimpbaseToolingPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/tooling/package.json"));
+  await copyDirectoryIfExists(resolve(chimpbaseToolingPackageDir, "dist"), resolve(projectDir, "node_modules/@chimpbase/tooling/dist"));
 
   await mkdir(resolve(projectDir, "data"), { recursive: true });
 
@@ -251,5 +254,12 @@ async function installFixtureDependencies(projectDir: string): Promise<void> {
 
   if (exitCode !== 0) {
     throw new Error(`fixture install failed\n${stdout}\n${stderr}`);
+  }
+}
+
+async function copyDirectoryIfExists(sourceDir: string, targetDir: string): Promise<void> {
+  try {
+    await cp(sourceDir, targetDir, { recursive: true });
+  } catch {
   }
 }

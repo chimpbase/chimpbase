@@ -105,6 +105,12 @@ interface WorkerLane {
   serializedOperations: Promise<void>;
 }
 
+export interface StartedDenoHost {
+  host: ChimpbaseDenoHost;
+  server: DenoServeHandle | null;
+  stop(): Promise<void>;
+}
+
 export type TelemetryRecord = ChimpbaseTelemetryRecord;
 export type ActionExecutionResult = ChimpbaseActionExecutionResult;
 export type CronScheduleExecutionResult = ChimpbaseCronScheduleExecutionResult;
@@ -576,7 +582,7 @@ export class ChimpbaseDenoHost {
     };
   }
 
-  start(options: { runWorker?: boolean; serve?: boolean } = {}) {
+  start(options: { runWorker?: boolean; serve?: boolean } = {}): StartedDenoHost {
     const runServe = options.serve ?? !options.runWorker;
     const runWorker = options.runWorker ?? !options.serve;
     const worker = runWorker ? this.startWorker() : null;

@@ -114,6 +114,12 @@ interface WorkerLane {
   serializedOperations: Promise<void>;
 }
 
+export interface StartedBunHost {
+  host: ChimpbaseBunHost;
+  server: Bun.Server<unknown> | null;
+  stop(): Promise<void>;
+}
+
 export type TelemetryRecord = ChimpbaseTelemetryRecord;
 export type ActionExecutionResult = ChimpbaseActionExecutionResult;
 export type CronScheduleExecutionResult = ChimpbaseCronScheduleExecutionResult;
@@ -578,7 +584,7 @@ export class ChimpbaseBunHost {
     });
   }
 
-  start(options: { runWorker?: boolean; serve?: boolean } = {}) {
+  start(options: { runWorker?: boolean; serve?: boolean } = {}): StartedBunHost {
     const runServe = options.serve ?? !options.runWorker;
     const runWorker = options.runWorker ?? !options.serve;
     const worker = runWorker ? this.startWorker() : null;

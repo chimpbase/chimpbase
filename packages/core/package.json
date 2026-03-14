@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/core",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "Core engine, registry and execution model for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -21,19 +21,26 @@
     "typescript"
   ],
   "files": [
-    "*.ts",
+    "dist",
     "README.md",
     "LICENSE",
     "NOTICE"
   ],
   "exports": {
-    ".": "./index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "prepack": "node ../../scripts/build-package.mjs core"
+  },
   "dependencies": {
-    "@chimpbase/runtime": "0.1.23",
+    "@chimpbase/runtime": "0.1.24",
     "kysely": "^0.28.11"
   }
 }

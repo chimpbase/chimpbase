@@ -76,7 +76,7 @@ describe("portable package guards", () => {
     ) as { files?: string[] };
 
     expect(manifest.files).toEqual([
-      "*.ts",
+      "dist",
       "README.md",
       "LICENSE",
       "NOTICE",
@@ -95,6 +95,45 @@ describe("portable package guards", () => {
       for (const [dependency, version] of Object.entries(manifest.dependencies ?? {})) {
         if (dependency.startsWith("@chimpbase/") && version.startsWith("workspace:")) {
           violations.push(`packages/${packageName}/package.json: ${dependency} -> ${version}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  test("packages consumed by the Deno host publish JavaScript runtime exports", async () => {
+    const packageDirs = ["runtime", "core", "tooling", "postgres", "deno"] as const;
+    const violations: string[] = [];
+
+    for (const packageName of packageDirs) {
+      const manifest = JSON.parse(
+        await readFile(resolve(repoRoot, `packages/${packageName}/package.json`), "utf8"),
+      ) as {
+        exports?: Record<string, string | { default?: string; import?: string; types?: string }>;
+        files?: string[];
+      };
+
+      if (!manifest.files?.includes("dist")) {
+        violations.push(`packages/${packageName}/package.json: missing dist in files`);
+      }
+
+      for (const [subpath, entry] of Object.entries(manifest.exports ?? {})) {
+        if (typeof entry === "string") {
+          violations.push(`packages/${packageName}/package.json: ${subpath} must use object exports`);
+          continue;
+        }
+
+        if (!entry.import?.endsWith(".js")) {
+          violations.push(`packages/${packageName}/package.json: ${subpath} import must point to .js`);
+        }
+
+        if (!entry.default?.endsWith(".js")) {
+          violations.push(`packages/${packageName}/package.json: ${subpath} default must point to .js`);
+        }
+
+        if (!entry.types?.endsWith(".d.ts")) {
+          violations.push(`packages/${packageName}/package.json: ${subpath} types must point to .d.ts`);
         }
       }
     }

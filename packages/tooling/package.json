@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/tooling",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "Local tooling, config loading and CLI helpers for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -21,25 +21,64 @@
     "schema"
   ],
   "files": [
-    "src"
+    "dist"
   ],
   "exports": {
-    ".": "./src/index.ts",
-    "./app": "./src/app.ts",
-    "./cli": "./src/cli.ts",
-    "./config": "./src/config.ts",
-    "./migrations": "./src/migrations.ts",
-    "./postgres_docker": "./src/postgres_docker.ts",
-    "./schema": "./src/schema.ts",
-    "./secrets": "./src/secrets.ts",
-    "./workflow_contracts": "./src/workflow_contracts.ts"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    },
+    "./app": {
+      "types": "./dist/src/app.d.ts",
+      "import": "./dist/src/app.js",
+      "default": "./dist/src/app.js"
+    },
+    "./cli": {
+      "types": "./dist/src/cli.d.ts",
+      "import": "./dist/src/cli.js",
+      "default": "./dist/src/cli.js"
+    },
+    "./config": {
+      "types": "./dist/src/config.d.ts",
+      "import": "./dist/src/config.js",
+      "default": "./dist/src/config.js"
+    },
+    "./migrations": {
+      "types": "./dist/src/migrations.d.ts",
+      "import": "./dist/src/migrations.js",
+      "default": "./dist/src/migrations.js"
+    },
+    "./postgres_docker": {
+      "types": "./dist/src/postgres_docker.d.ts",
+      "import": "./dist/src/postgres_docker.js",
+      "default": "./dist/src/postgres_docker.js"
+    },
+    "./schema": {
+      "types": "./dist/src/schema.d.ts",
+      "import": "./dist/src/schema.js",
+      "default": "./dist/src/schema.js"
+    },
+    "./secrets": {
+      "types": "./dist/src/secrets.d.ts",
+      "import": "./dist/src/secrets.js",
+      "default": "./dist/src/secrets.js"
+    },
+    "./workflow_contracts": {
+      "types": "./dist/src/workflow_contracts.d.ts",
+      "import": "./dist/src/workflow_contracts.js",
+      "default": "./dist/src/workflow_contracts.js"
+    }
   },
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "prepack": "node ../../scripts/build-package.mjs tooling"
+  },
   "dependencies": {
-    "@chimpbase/core": "0.1.23",
-    "@chimpbase/runtime": "0.1.23",
+    "@chimpbase/core": "0.1.24",
+    "@chimpbase/runtime": "0.1.24",
     "kysely": "^0.28.11",
     "pg": "^8.16.3"
   }

@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/runtime",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "Runtime DSL and public primitives for Chimpbase applications.",
   "license": "Apache-2.0",
   "type": "module",
@@ -21,16 +21,23 @@
     "typescript"
   ],
   "files": [
-    "index.ts",
+    "dist",
     "README.md",
     "LICENSE",
     "NOTICE"
   ],
   "exports": {
-    ".": "./index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "publishConfig": {
     "access": "public"
+  },
+  "scripts": {
+    "prepack": "node ../../scripts/build-package.mjs runtime"
   },
   "dependencies": {
     "kysely": "^0.28.11"

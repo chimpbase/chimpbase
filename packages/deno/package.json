@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/deno",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "Deno CLI and self-hosted host for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -21,20 +21,31 @@
     "backend"
   ],
   "files": [
-    "src"
+    "dist"
   ],
   "exports": {
-    ".": "./src/library.ts",
-    "./cli": "./src/cli.ts"
+    ".": {
+      "types": "./dist/src/library.d.ts",
+      "import": "./dist/src/library.js",
+      "default": "./dist/src/library.js"
+    },
+    "./cli": {
+      "types": "./dist/src/cli.d.ts",
+      "import": "./dist/src/cli.js",
+      "default": "./dist/src/cli.js"
+    }
   },
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "prepack": "node ../../scripts/build-package.mjs deno"
+  },
   "dependencies": {
-    "@chimpbase/core": "0.1.23",
-    "@chimpbase/postgres": "0.1.23",
-    "@chimpbase/runtime": "0.1.23",
-    "@chimpbase/tooling": "0.1.23",
+    "@chimpbase/core": "0.1.24",
+    "@chimpbase/postgres": "0.1.24",
+    "@chimpbase/runtime": "0.1.24",
+    "@chimpbase/tooling": "0.1.24",
     "kysely": "^0.28.11"
   },
   "devDependencies": {
