@@ -1,52 +1,42 @@
 # chimpbase
 
-Build action-driven backends with a small runtime surface.
+## Build complex backends with fewer moving parts. Chimpbase + PostgreSQL
 
-The posture is simple:
+PostgreSQL-backed backend primitives for software that needs more than request-response, without adding a distributed systems stack before it is necessary.
 
-- write TypeScript
-- pick a host package for Bun or Deno CLI/self-hosted
-- use Postgres in production
-- use SQLite or memory when local simplicity matters
-- keep the primitives close to the problem
-- avoid boilerplate and extra infrastructure too early
+Chimpbase gives you a small runtime for the parts of backend software that usually force teams to adopt extra infrastructure too early:
 
-## Install
+- actions for business operations
+- workers for background jobs
+- durable queues
+- durable cron schedules
+- workflows that survive time, retries and restarts
+- HTTP handlers when you need them
 
-Host packages available today:
+The goal is simple:
 
-- `@chimpbase/bun` for Bun-first applications
-- `@chimpbase/deno` for Deno CLI/self-hosted applications
-- `@chimpbase/runtime` for explicit `chimpbase.app.ts`, `registrations`, and workflow definitions
+Use PostgreSQL as both your application database and your coordination layer, so you can build serious software without starting with a broker, a scheduler and a workflow engine.
 
-For Bun:
+## What You Don't Need On Day One
 
-```bash
-bun add @chimpbase/bun
-```
+With Chimpbase + PostgreSQL, you do not need separate tools just to get started with:
 
-For Deno CLI/self-hosted:
+- background jobs
+- recurring jobs
+- durable retries
+- long-running business processes
+- internal event handling
+- operational state
 
-```bash
-deno add npm:@chimpbase/deno
-```
+That means fewer moving parts, fewer integration boundaries and less accidental complexity while the product is still taking shape.
 
-Add `@chimpbase/runtime` when you want explicit app modules or workflow definitions.
-
-The Deno host relies on Deno's npm and Node compatibility.
-
-## Show me the code
-
-Bun:
+## 30-Second Example
 
 ```ts
 import { createChimpbase } from "@chimpbase/bun";
 import { action, subscription, v, worker } from "@chimpbase/runtime";
 
 const chimpbase = await createChimpbase({
-  telemetry: {
-    minLevel: "info",
-  },
   storage: { engine: "postgres", url: process.env.DATABASE_URL! },
 });
 
@@ -62,19 +52,6 @@ const createCustomer = action({
       [input.email, input.name, input.plan],
     );
 
-    await ctx.kv.set(`customer:${customer.id}:status`, "new");
-
-    await ctx.collection.insert("customer_profiles", {
-      customerId: customer.id,
-      plan: input.plan,
-      source: "signup",
-    });
-
-    await ctx.stream.append("customers", "customer.created", {
-      customerId: customer.id,
-      email: input.email,
-    });
-
     ctx.pubsub.publish("customer.created", {
       customerId: customer.id,
       email: input.email,
@@ -82,573 +59,166 @@ const createCustomer = action({
 
     return customer;
   },
-  name: "createCustomer",
 });
 
+chimpbase.register({ createCustomer });
+
 chimpbase.register(
-  createCustomer,
   subscription("customer.created", async (ctx, event) => {
     await ctx.queue.enqueue("customer.sync", event);
   }, { idempotent: true, name: "enqueueCustomerSync" }),
   worker("customer.sync", async (ctx, event) => {
-    const apiKey = ctx.secret("CRM_API_KEY");
-
     ctx.log.info("syncing customer", { customerId: event.customerId });
-    ctx.metric("customer_sync_total", 1, { source: "crm" });
-
-    await ctx.collection.update(
-      "customer_profiles",
-      { customerId: event.customerId },
-      { syncedWithCrm: true },
+    await ctx.query(
+      "update customers set synced_at = now() where id = ?1",
+      [event.customerId],
     );
-
-    return { apiKeyLoaded: Boolean(apiKey) };
   }),
 );
 
 await chimpbase.start();
 ```
 
-Deno CLI/self-hosted:
+This is the shape Chimpbase is optimizing for:
 
-```ts
-import { createChimpbaseDeno } from "npm:@chimpbase/deno";
-import { action } from "npm:@chimpbase/runtime";
+- one runtime
+- one database
+- explicit backend primitives
+- no infrastructure ceremony by default
 
-const chimpbase = await createChimpbaseDeno({
-  storage: { engine: "sqlite", path: "data/acme-deno.db" },
-});
+## Why Chimpbase Feels Simpler
 
-const health = action({
-  async handler() {
-    return { ok: true };
-  },
-});
-
-chimpbase.register({ health });
-
-await chimpbase.start();
-```
-
-For one-file apps, that is the smallest shape chimpbase is optimizing for:
-
-- SQL when you want SQL
-- one host instance with explicit registrations
-- no extra app wrapper when you do not need one
-- deploy/runtime wiring provided by the host package
-
-For multi-module apps, keep `chimpbase.app.ts` explicit and export `registrations`.
-
-That is still the canonical composition shape for larger projects:
-
-- SQL when you want SQL
-- one code-first app definition with `registrations`
-- deploy/runtime wiring provided by the host package
-
-`createChimpbase.from(import.meta.dir)` and `createChimpbaseDeno.from(Deno.cwd())` still exist as compatibility helpers. If `chimpbase.app.ts` is present, those loaders now prefer it over legacy project discovery.
-
-## Why this feels simple
-
-Most backend complexity is real complexity:
+Most backend complexity is real:
 
 - state changes
 - side effects
 - retries
 - delayed work
-- long-running business logic
+- recurring work
+- processes that survive time
 
-The mistake is usually adding too many concepts around that.
+What usually makes systems harder is spreading that complexity across too many tools too early.
 
-The shared runtime model stays tight:
+Chimpbase keeps those concerns close together:
 
 - `action(...)` for business operations
-- `subscription(...)` for ephemeral internal pub/sub
-- `worker(...)` for background work
-- `cron(...)` for recurring scheduled work
-- `workflow(...)` when a process has to survive time
+- `subscription(...)` for internal choreography
+- `queue.enqueue(...)` + `worker(...)` for durable background work
+- `cron(...)` for recurring work
+- `workflow(...)` for long-running processes
 
-Everything runs on the same engine and can share the same storage story.
+All of them run on the same runtime and can share the same PostgreSQL storage story.
 
-## Postgres first, SQLite when local
+## PostgreSQL First
 
-SQLite and memory are supported for local work and fast tests.
+Chimpbase supports SQLite and memory for local development and tests.
 
-But the default recommendation is:
+But the default recommendation is: 
 
-use Postgres.
+> Just use PostgreSQL
 
 That gives you a clean baseline:
 
-- application data in Postgres
-- queue state in Postgres
-- durable workflow state in Postgres
-- no broker required on day one
-- no extra service just to coordinate background work
+- application data in PostgreSQL
+- queue state in PostgreSQL
+- cron schedule state in PostgreSQL
+- workflow state in PostgreSQL
+- fewer operational dependencies on day one
 
-If `DATABASE_URL` is present, the Bun and Deno hosts both take the Postgres path automatically.
+If later you need more infrastructure, add it because the workload demands it, not because the framework required it from the start.
 
-## The primitives
+## Quick Start
 
-The value of this project is mostly in the primitives, not in hiding your backend behind a giant framework.
+Install the Bun host:
 
-### `query`
+```bash
+bun add @chimpbase/bun
+```
 
-Use raw SQL directly.
-
-If your domain wants a table, join, transaction or `RETURNING`, just write it.
-
-### `pubsub.publish` + `subscription`
-
-Use ephemeral pub/sub for internal choreography without turning your codebase into a message-broker thesis.
-
-Publish from an action, react in subscriptions, keep the flow explicit.
-
-#### Idempotent subscriptions
-
-Cross-process event delivery can cause duplicate dispatches (e.g., on container restart before the high-water mark advances). Mark a subscription as idempotent to skip events it has already processed:
+Start with PostgreSQL:
 
 ```ts
-subscription("order.created", handleOrderCreated, {
-  idempotent: true,
-  name: "handleOrderCreated",
+import { createChimpbase } from "@chimpbase/bun";
+
+const chimpbase = await createChimpbase({
+  storage: { engine: "postgres", url: process.env.DATABASE_URL! },
 });
 ```
 
-When `idempotent: true`, the check and handler execution happen atomically inside the same DB transaction. A stable `name` is required so the deduplication marker is deterministic. Events without an `id` (local-only events) bypass the check automatically.
-
-If you want those deduplication markers pruned automatically:
+Register actions, workers, subscriptions and cron jobs explicitly:
 
 ```ts
-subscriptions: {
-  idempotency: {
-    retention: {
-      enabled: true,
-      maxAgeDays: 14,        // default: 30
-      schedule: "15 2 * * *", // default: "0 2 * * *"
-    },
-  },
-}
+chimpbase.register({ createCustomer });
+
+chimpbase.register(
+  worker("customer.sync", syncCustomer),
+  cron("billing.rollup", "0 * * * *", runBillingRollup),
+);
 ```
 
-This registers an internal cron (`__chimpbase.subscription.idempotency.cleanup`) that scans `_chimpbase.sub.seen:*` keys and deletes markers older than `maxAgeDays`.
+Then start the runtime:
 
-### `queue.enqueue` + `worker`
+```ts
+await chimpbase.start();
+```
 
-Use `queue.enqueue(...)` to dispatch durable jobs and `worker(...)` to process them.
-
-This is the primitive for “do this later” or “do this out of band”.
-
-### `cron`
-
-Use `cron(...)` for durable recurring schedules such as rollups, reminders and operational snapshots.
-
-Cron expressions use the standard 5-field shape in UTC and handlers run through the same worker path as queues.
-
-### `kv`
-
-Use `kv` for tiny pieces of operational state that do not deserve a full table yet.
-
-### `collection`
-
-Use `collection` when you want schemaless documents for side data, operational metadata or app-owned blobs.
-
-### `stream.append` + `stream.read`
-
-Use `stream` when you want append/read semantics for timelines, activity feeds or internal event history.
-
-### `secret`
-
-Use `secret(name)` for preloaded secrets.
-
-The runtime can load them from mounted files, environment variables and `.env`, but that detail stays out of your app code.
-
-### `log`, `metric`, `trace`
-
-These primitives keep observability close to the code that matters, instead of forcing a separate abstraction layer for everything.
-
-Telemetry can optionally be persisted into dedicated event streams for debugging and analytics. See the [Telemetry persistence](#telemetry-persistence) section below.
+## The Primitives
 
 ### `action`
 
-Prefer validator-backed actions when the operation is called across HTTP, CLI, workflows or other actions:
+Use `action(...)` for business operations that may be called from HTTP, CLI, workflows or other actions.
 
-```ts
-import { action, v } from "@chimpbase/runtime";
+### `subscription`
 
-const createCustomer = action({
-  args: v.object({
-    email: v.string(),
-    name: v.string(),
-    plan: v.string(),
-  }),
-  async handler(ctx, input) {
-    return await ctx.query(
-      "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id, email, name, plan",
-      [input.email, input.name, input.plan],
-    );
-  },
-  name: "createCustomer",
-});
+Use `subscription(...)` for internal pub/sub reactions. Mark handlers as idempotent when replay safety matters.
 
-await createCustomer({
-  email: "alice@example.com",
-  name: "Alice",
-  plan: "pro",
-});
-```
+### `queue.enqueue` + `worker`
 
-Inside an active chimpbase runtime scope, or after the action has been registered on a host, the action ref is directly callable. The runtime still keeps the serializable action name for workflows, CLI execution and persistence.
+Use queues and workers for durable background execution and retries.
 
-`ctx.action(...)` still works when you want explicit dispatch or dynamic references. `action("name", handler)` also still works for tuple-style internal handlers and compatibility with older code.
+### `cron`
 
-When the action is exported from `chimpbase.app.ts`, the loader can infer a durable id from `module path + export name`, so `name` becomes optional:
+Use `cron(...)` for recurring work such as rollups, reminders and cleanup jobs.
 
-```ts
-import { action, v, workflow, workflowActionStep } from "@chimpbase/runtime";
+Missed cron backlog is skipped after downtime. The runtime resumes from the current slot instead of replaying every missed interval.
 
-export const createCustomer = action({
-  args: v.object({
-    email: v.string(),
-    name: v.string(),
-  }),
-  async handler(ctx, input) {
-    return await ctx.query(
-      "insert into customers (email, name) values (?1, ?2) returning id, email, name",
-      [input.email, input.name],
-    );
-  },
-});
+### `workflow`
 
-export const onboardingWorkflow = workflow({
-  name: "customer.onboarding",
-  version: 1,
-  initialState(input) {
-    return { customerId: input.customerId, created: false };
-  },
-  steps: [
-    workflowActionStep("create-customer", createCustomer, {
-      args: ({ input }) => [{ email: input.email, name: input.name }],
-      onResult: ({ result, state }) => ({ ...state, created: true, customerId: result.id }),
-    }),
-  ],
-});
+Use `workflow(...)` when a business process has to survive time, restarts and retries.
 
-export default {
-  project: { name: "acme-app" },
-  registrations: [createCustomer, onboardingWorkflow],
-};
-```
+### `query`
 
-In that case the inferred action id is `chimpbase.app.ts#createCustomer`. Outside app module loading, you can also infer the id from the registration key with `chimpbase.register({ createCustomer })`, which assigns the action name `createCustomer`. Only the bare `chimpbase.register(createCustomer)` form still requires an explicit `name`.
-
-## Quick start
-
-From this repository:
-
-```bash
-bun install
-bun test
-```
-
-Run the plain TypeScript example from the monorepo root:
-
-```bash
-cp examples/bun/todo-ts/.env.example examples/bun/todo-ts/.env
-export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/chimpbase
-bun run dev:todo-ts
-```
-
-Run an action directly from the monorepo root:
-
-```bash
-export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/chimpbase
-bun run --filter @chimpbase/example-todo-ts action -- createProject '{"name":"Operations Platform","ownerEmail":"ops-lead@chimpbase.dev"}'
-```
-
-If you want the intended experience, start with `examples/bun/todo-ts`, but install dependencies only once at the repository root.
-
-## What this is good for
-
-This repo is a strong fit when you want to build:
-
-- internal systems
-- operational tooling
-- product backends
-- evented business flows
-- async-heavy applications without a huge platform footprint
-
-It is especially useful when your instinct is:
-
-“I want to solve the domain problem, not spend a week wiring glue.”
-
-## Durable cron schedules
-
-Use `cron(...)` when work should happen on a recurring schedule and you want that schedule to live in the same runtime and storage model as the rest of the app.
-
-Simple example:
-
-```ts
-import {
-  action,
-  cron,
-} from "@chimpbase/runtime";
-
-const captureTodoBacklogSnapshot = async (ctx, invocation) => {
-  const [summary] = await ctx.query(`
-    SELECT
-      COUNT(*) AS total,
-      SUM(CASE WHEN status = 'backlog' THEN 1 ELSE 0 END) AS backlog,
-      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
-    FROM todo_items
-  `);
-
-  await ctx.collection.insert("todo_backlog_snapshots", {
-    capturedAt: invocation.fireAt,
-    schedule: invocation.name,
-    summary,
-  });
-};
-
-chimpbase.register(
-  cron("todo.backlog.snapshot", "*/15 * * * *", captureTodoBacklogSnapshot),
-  action({
-    async handler(ctx) {
-      return await ctx.collection.find("todo_backlog_snapshots", {}, { limit: 50 });
-    },
-    name: "listTodoBacklogSnapshots",
-  }),
-);
-```
-
-The important bit is the execution model:
-
-- the schedule is durable
-- the next fire time is advanced before the handler runs
-- the handler itself runs through the worker path, so retries and failure handling stay consistent
-
-For a concrete example in this repo, see `examples/bun/todo-ts/src/modules/todos/todo.cron.ts`.
-
-## Telemetry persistence
-
-By default, `ctx.log`, `ctx.metric` and `ctx.trace` are collected in memory and available via `drainTelemetryRecords()`. You can also persist them into dedicated event streams backed by the same Postgres or SQLite storage.
-
-### Enable globally
-
-```ts
-const chimpbase = await createChimpbase({
-  telemetry: {
-    persist: { log: true, metric: true, trace: true },
-  },
-  storage: { engine: "sqlite", path: "data/telemetry-app.db" },
-});
-```
-
-When enabled, telemetry records are buffered during handler execution and batch-appended to their respective streams after the handler completes:
-
-| Stream | Event names | Payload |
-|---|---|---|
-| `_chimpbase.logs` | `log.debug`, `log.info`, `log.warn`, `log.error` | `{ message, attributes, scope, timestamp }` |
-| `_chimpbase.metrics` | `metric` | `{ name, value, labels, scope, timestamp }` |
-| `_chimpbase.traces` | `trace.start`, `trace.end` | `{ name, phase, status?, attributes, scope, timestamp }` |
-
-You can read them back with `ctx.stream.read("_chimpbase.logs")` like any other stream.
-
-### Filter by log level
-
-Only persist warnings and errors:
-
-```ts
-telemetry: {
-  persist: { log: true },
-  minLevel: "warn",
-}
-```
-
-### Per-handler override
-
-Override the global setting on individual actions, workers, subscriptions or crons:
-
-```ts
-// Opt a noisy action out of telemetry persistence
-action({ name: "healthCheck", handler, telemetry: false });
-
-// Opt a specific action in when global is off
-action({ name: "importantAction", handler, telemetry: { log: true, metric: true } });
-
-// Only disable trace persistence for one worker
-worker("fastWorker", handler, undefined, { telemetry: { trace: false } });
-```
-
-### Automatic cleanup
-
-Enable retention to automatically delete old telemetry stream events:
-
-```ts
-const chimpbase = await createChimpbase({
-  telemetry: {
-    persist: { log: true, metric: true, trace: true },
-  },
-  storage: { engine: "postgres", url: process.env.DATABASE_URL! },
-  telemetryRetention: {
-    enabled: true,
-    maxAgeDays: 14,         // default: 30
-    schedule: "0 3 * * *",  // default: "0 2 * * *" (daily at 2am UTC)
-  },
-});
-```
-
-This registers an internal cron (`__chimpbase.telemetry.cleanup`) that runs on the configured schedule and deletes telemetry stream events older than `maxAgeDays`.
-
-## Durable workflows
-
-Workflows exist here for the cases where actions, subscriptions and queues stop being enough by themselves.
-
-Use them when a process needs to:
-
-- survive restarts
-- wait for time to pass
-- wait for an external signal
-- keep explicit state over days, weeks or months
-
-Simple example:
-
-```ts
-import {
-  action,
-  v,
-  workflow,
-} from "@chimpbase/runtime";
-
-const provisionCustomer = action({
-  args: v.object({
-    customerId: v.string(),
-  }),
-  async handler(_ctx, input) {
-    return { customerId: input.customerId, ok: true };
-  },
-  name: "provisionCustomer",
-});
-
-const onboarding = workflow({
-  name: "customer.onboarding",
-  version: 1,
-  initialState(input) {
-    return {
-      customerId: input.customerId,
-      phase: "provision",
-      kickoffCompletedAt: null,
-      provisioned: false,
-    };
-  },
-  async run(wf) {
-    if (wf.state.phase === "provision") {
-      await provisionCustomer({ customerId: wf.state.customerId });
-      return wf.transition({
-        ...wf.state,
-        phase: "waiting_kickoff",
-        provisioned: true,
-      });
-    }
-
-    if (wf.state.phase === "waiting_kickoff") {
-      return wf.waitForSignal("kickoff.completed", {
-        stepId: "wait-kickoff",
-        timeoutMs: 14 * 24 * 60 * 60 * 1000,
-        onSignal: ({ payload, state }) => ({
-          ...state,
-          kickoffCompletedAt: payload.completedAt,
-          phase: "done",
-        }),
-        onTimeout: "fail",
-      });
-    }
-
-    if (wf.state.phase === "done") {
-      return wf.complete(wf.state);
-    }
-
-    return wf.fail(`unknown phase: ${wf.state.phase}`);
-  },
-});
-
-chimpbase.register(
-  onboarding,
-  provisionCustomer,
-  action({
-    args: v.object({
-      customerId: v.string(),
-    }),
-    async handler(ctx, input) {
-      return await ctx.workflow.start("customer.onboarding", { customerId: input.customerId }, {
-        workflowId: `workflow:${input.customerId}`,
-      });
-    },
-    name: "startOnboarding",
-  }),
-  action({
-    args: v.object({
-      completedAt: v.string(),
-      customerId: v.string(),
-    }),
-    async handler(ctx, input) {
-      await ctx.workflow.signal(`workflow:${input.customerId}`, "kickoff.completed", {
-        completedAt: input.completedAt,
-      });
-      return { ok: true };
-    },
-    name: "completeKickoff",
-  }),
-);
-```
-
-There is also workflow contract sync in the CLI:
-
-```bash
-bun packages/bun/src/cli.ts contracts --project-dir ./my-project
-bun packages/bun/src/cli.ts contracts --project-dir ./my-project --check
-deno run -A packages/deno/src/cli.ts contracts --project-dir ./my-project
-deno run -A packages/deno/src/cli.ts contracts --project-dir ./my-project --check
-```
-
-That gives you versioned snapshots and compatibility checks without introducing another workflow platform.
+Use raw SQL directly when your domain wants SQL.
 
 ## Examples
 
-The repo currently ships with Bun examples:
+- `examples/bun/todo-ts` for a modular TypeScript app with HTTP, actions, subscriptions, workers and cron
+- `examples/bun/todo-ts-decorators` for decorator-based registration
+- `examples/bun/todo-ts-nestjs` for NestJS integration
+- `examples/load-test` for single-process capacity testing with SQLite and PostgreSQL
 
-- `examples/bun/todo-ts`
-- `examples/bun/todo-ts` includes a cron example in `src/modules/todos/todo.cron.ts`
-- `examples/bun/todo-ts-decorators`
-- `examples/bun/todo-ts-nestjs`
-- `examples/bun/todo-ts-nestjs-decorators`
+## When Chimpbase Is A Good Fit
 
-The Deno host is available for CLI/self-hosted projects and uses the same runtime DSL, but the repository examples have not been duplicated under `examples/deno` yet.
+Chimpbase is a good fit when you want:
 
-## Release model
+- PostgreSQL as the main system of record
+- explicit backend primitives instead of a large framework abstraction
+- background work without adopting a broker immediately
+- durable workflows without introducing a separate workflow platform
+- a small operational footprint while the product is still evolving
 
-The published packages intentionally ship TypeScript source files instead of a prebuilt `dist/` directory.
+## Install
 
-That means:
+You do not need to install any extension.
 
-- `@chimpbase/bun` is Bun-first
-- `@chimpbase/deno` is Deno CLI/self-hosted
-- `@chimpbase/runtime` and `@chimpbase/core` are distributed as source for TypeScript-aware consumers
-- the monorepo release check is `bun run release:check`
-- the publish flow is `bun run release:publish`
+For Bun:
 
-This keeps the alpha small and honest while the host surface grows incrementally.
+```bash
+bun add @chimpbase/bun
+```
 
-## Status
+For Deno:
 
-The project already has:
-
-- SQLite integration coverage
-- Postgres integration coverage
-- Deno CLI/self-hosted host support for Postgres, SQLite and memory
-- durable workflow tests
-- workflow contract sync tests
-- end-to-end tests for the examples
-
-The intended reading is straightforward:
-
-this is a Postgres-first runtime with practical local-storage options for developers who want to build serious systems with less ceremony.
+```bash
+deno add npm:@chimpbase/deno
+```
