@@ -66,6 +66,7 @@ const registrations = [
   subscription("todo.started", auditTodoStarted, { idempotent: true, name: "auditTodoStarted" }),
   subscription("todo.completed", auditTodoCompleted, { idempotent: true, name: "auditTodoCompleted" }),
   subscription("todo.completed", enqueueTodoCompletedNotification, { idempotent: true, name: "enqueueTodoCompletedNotification" }),
+  // After downtime, the runtime resumes from the current slot instead of replaying every missed interval.
   cron("todo.backlog.snapshot", "*/15 * * * *", captureTodoBacklogSnapshot),
   listWorkspacePreferences,
   setWorkspacePreference,
