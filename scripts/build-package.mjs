@@ -16,8 +16,16 @@ const packageConfigs = {
     dir: "packages/core",
     types: ["node"],
   },
+  host: {
+    dir: "packages/host",
+    types: ["node"],
+  },
   deno: {
     dir: "packages/deno",
+    types: ["node"],
+  },
+  node: {
+    dir: "packages/node",
     types: ["node"],
   },
   postgres: {

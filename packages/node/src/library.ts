@@ -13,9 +13,9 @@ import {
 } from "@chimpbase/host";
 import { defineChimpbaseApp, type ChimpbaseAppDefinition, type ChimpbaseAppDefinitionInput } from "@chimpbase/core";
 
-import { bunRuntimeShim, ChimpbaseBunHost, type ActionExecutionResult } from "./runtime.ts";
+import { nodeRuntimeShim, ChimpbaseNodeHost, type ActionExecutionResult, type NodeServeHandle } from "./runtime.ts";
 
-const runtimeLibrary = createChimpbaseRuntimeLibrary(ChimpbaseBunHost, bunRuntimeShim);
+const runtimeLibrary = createChimpbaseRuntimeLibrary(ChimpbaseNodeHost, nodeRuntimeShim);
 
 export type {
   CreateChimpbaseAppFieldsOptions,
@@ -24,6 +24,7 @@ export type {
   CreateChimpbaseRuntimeOptions,
   CreateChimpbaseWithDefaultsOptions,
   LoadChimpbaseAppOptions,
+  NodeServeHandle,
   StartChimpbaseProjectOptions,
   StartedChimpbaseProject,
   SyncChimpbaseSchemaOptions,

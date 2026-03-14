@@ -1,20 +1,20 @@
 {
-  "name": "@chimpbase/deno",
+  "name": "@chimpbase/node",
   "version": "0.1.25",
-  "description": "Deno CLI and self-hosted host for Chimpbase.",
+  "description": "Node.js host for building action-driven backends on Postgres with minimal boilerplate.",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chimpbase/chimpbase.git",
-    "directory": "packages/deno"
+    "directory": "packages/node"
   },
   "homepage": "https://github.com/chimpbase/chimpbase#readme",
   "bugs": {
     "url": "https://github.com/chimpbase/chimpbase/issues"
   },
   "keywords": [
-    "deno",
+    "node",
     "postgres",
     "typescript",
     "workflow",
@@ -35,11 +35,14 @@
       "default": "./dist/src/cli.js"
     }
   },
+  "bin": {
+    "chimpbase-node": "./dist/src/cli.js"
+  },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "prepack": "node ../../scripts/build-package.mjs deno"
+    "prepack": "node ../../scripts/build-package.mjs node"
   },
   "dependencies": {
     "@chimpbase/core": "0.1.25",
@@ -50,6 +53,7 @@
     "kysely": "^0.28.11"
   },
   "devDependencies": {
+    "@types/node": "^24.6.1",
     "typescript": "^5.9.3"
   }
 }

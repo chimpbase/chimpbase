@@ -5,6 +5,7 @@
     "": {
       "name": "@chimpbase/bun",
       "devDependencies": {
+        "@chimpbase/host": "workspace:*",
         "@nestjs/common": "^11.1.5",
         "@nestjs/core": "^11.1.5",
         "@types/node": "^24.6.1",
@@ -90,15 +91,16 @@
     },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.1.19",
+      "version": "0.1.24",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
       "dependencies": {
-        "@chimpbase/core": "0.1.19",
-        "@chimpbase/postgres": "0.1.19",
-        "@chimpbase/runtime": "0.1.19",
-        "@chimpbase/tooling": "0.1.19",
+        "@chimpbase/core": "0.1.24",
+        "@chimpbase/host": "0.1.24",
+        "@chimpbase/postgres": "0.1.24",
+        "@chimpbase/runtime": "0.1.24",
+        "@chimpbase/tooling": "0.1.24",
         "kysely": "^0.28.11",
       },
       "devDependencies": {
@@ -109,32 +111,63 @@
     },
     "packages/core": {
       "name": "@chimpbase/core",
-      "version": "0.1.19",
+      "version": "0.1.24",
       "dependencies": {
-        "@chimpbase/runtime": "0.1.19",
+        "@chimpbase/runtime": "0.1.24",
         "kysely": "^0.28.11",
       },
     },
     "packages/deno": {
       "name": "@chimpbase/deno",
-      "version": "0.1.19",
+      "version": "0.1.24",
       "dependencies": {
-        "@chimpbase/core": "workspace:^",
-        "@chimpbase/postgres": "workspace:^",
-        "@chimpbase/runtime": "workspace:^",
-        "@chimpbase/tooling": "workspace:^",
+        "@chimpbase/core": "0.1.24",
+        "@chimpbase/host": "0.1.24",
+        "@chimpbase/postgres": "0.1.24",
+        "@chimpbase/runtime": "0.1.24",
+        "@chimpbase/tooling": "0.1.24",
         "kysely": "^0.28.11",
       },
       "devDependencies": {
         "typescript": "^5.9.3",
       },
     },
+    "packages/host": {
+      "name": "@chimpbase/host",
+      "version": "0.1.24",
+      "dependencies": {
+        "@chimpbase/core": "0.1.24",
+        "@chimpbase/postgres": "0.1.24",
+        "@chimpbase/runtime": "0.1.24",
+        "@chimpbase/tooling": "0.1.24",
+        "kysely": "^0.28.11",
+      },
+    },
+    "packages/node": {
+      "name": "@chimpbase/node",
+      "version": "0.1.24",
+      "bin": {
+        "chimpbase-node": "./dist/src/cli.js",
+      },
+      "dependencies": {
+        "@chimpbase/core": "0.1.24",
+        "@chimpbase/host": "0.1.24",
+        "@chimpbase/postgres": "0.1.24",
+        "@chimpbase/runtime": "0.1.24",
+        "@chimpbase/tooling": "0.1.24",
+        "kysely": "^0.28.11",
+      },
+      "devDependencies": {
+        "@types/node": "^24.6.1",
+        "typescript": "^5.9.3",
+      },
+    },
     "packages/postgres": {
       "name": "@chimpbase/postgres",
-      "version": "0.1.19",
+      "version": "0.1.24",
       "dependencies": {
-        "@chimpbase/core": "0.1.19",
-        "@chimpbase/runtime": "0.1.19",
+        "@chimpbase/core": "0.1.24",
+        "@chimpbase/runtime": "0.1.24",
         "kysely": "^0.28.11",
         "pg": "^8.16.3",
       },
@@ -145,17 +178,17 @@
     },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.1.19",
+      "version": "0.1.24",
       "dependencies": {
         "kysely": "^0.28.11",
       },
     },
     "packages/tooling": {
       "name": "@chimpbase/tooling",
-      "version": "0.1.19",
+      "version": "0.1.24",
       "dependencies": {
-        "@chimpbase/core": "0.1.19",
-        "@chimpbase/runtime": "0.1.19",
+        "@chimpbase/core": "0.1.24",
+        "@chimpbase/runtime": "0.1.24",
         "kysely": "^0.28.11",
         "pg": "^8.16.3",
       },
@@ -179,6 +212,10 @@
     "@chimpbase/example-todo-ts-nestjs": ["@chimpbase/example-todo-ts-nestjs@workspace:examples/bun/todo-ts-nestjs"],
 
     "@chimpbase/example-todo-ts-nestjs-decorators": ["@chimpbase/example-todo-ts-nestjs-decorators@workspace:examples/bun/todo-ts-nestjs-decorators"],
+
+    "@chimpbase/host": ["@chimpbase/host@workspace:packages/host"],
+
+    "@chimpbase/node": ["@chimpbase/node@workspace:packages/node"],
 
     "@chimpbase/postgres": ["@chimpbase/postgres@workspace:packages/postgres"],
 

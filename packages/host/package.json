@@ -1,13 +1,13 @@
 {
-  "name": "@chimpbase/core",
+  "name": "@chimpbase/host",
   "version": "0.1.25",
-  "description": "Core engine, registry and execution model for Chimpbase.",
+  "description": "Shared host runtime and adapters for Chimpbase runtimes.",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chimpbase/chimpbase.git",
-    "directory": "packages/core"
+    "directory": "packages/host"
   },
   "homepage": "https://github.com/chimpbase/chimpbase#readme",
   "bugs": {
@@ -15,32 +15,32 @@
   },
   "keywords": [
     "chimpbase",
-    "core",
-    "engine",
-    "workflow",
+    "host",
+    "runtime",
+    "postgres",
     "typescript"
   ],
   "files": [
-    "dist",
-    "README.md",
-    "LICENSE",
-    "NOTICE"
+    "dist"
   ],
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
     }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "prepack": "node ../../scripts/build-package.mjs core"
+    "prepack": "node ../../scripts/build-package.mjs host"
   },
   "dependencies": {
+    "@chimpbase/core": "0.1.25",
+    "@chimpbase/postgres": "0.1.25",
     "@chimpbase/runtime": "0.1.25",
+    "@chimpbase/tooling": "0.1.25",
     "kysely": "^0.28.11"
   }
 }

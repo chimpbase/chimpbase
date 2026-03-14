@@ -13,8 +13,11 @@
     "paths": {
       "@chimpbase/core": ["./packages/core/index.ts"],
       "@chimpbase/runtime": ["./packages/runtime/index.ts"],
+      "@chimpbase/host": ["./packages/host/src/index.ts"],
+      "@chimpbase/host/*": ["./packages/host/src/*"],
       "@chimpbase/bun": ["./packages/bun/src/library.ts"],
       "@chimpbase/deno": ["./packages/deno/src/library.ts"],
+      "@chimpbase/node": ["./packages/node/src/library.ts"],
       "@chimpbase/postgres": ["./packages/postgres/src/index.ts"],
       "@chimpbase/tooling": ["./packages/tooling/src/index.ts"],
       "@chimpbase/tooling/*": ["./packages/tooling/src/*"]
@@ -23,6 +26,8 @@
   "include": [
     "packages/bun/**/*.ts",
     "packages/deno/**/*.ts",
+    "packages/host/**/*.ts",
+    "packages/node/**/*.ts",
     "packages/postgres/**/*.ts",
     "packages/tooling/**/*.ts",
     "tests/**/*.ts",
