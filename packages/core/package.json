@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/core",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Core engine, registry and execution model for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -40,7 +40,7 @@
     "prepack": "node ../../scripts/build-package.mjs core"
   },
   "dependencies": {
-    "@chimpbase/runtime": "0.1.26",
+    "@chimpbase/runtime": "0.1.27",
     "kysely": "^0.28.11"
   }
 }

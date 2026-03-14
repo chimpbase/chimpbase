@@ -367,9 +367,20 @@ export class ChimpbaseEngine {
   async executeRoute(request: Request): Promise<ChimpbaseRouteExecutionResult> {
     const telemetryStart = this.telemetryRecords.length;
     const routeEnv = this.createRouteEnv();
-    const response = this.registry.httpHandler
-      ? await this.runWithActionInvoker(async () => await this.registry.httpHandler!(request, routeEnv))
-      : null;
+    const response = await this.runWithActionInvoker(async () => {
+      for (const route of this.registry.routes) {
+        const matched = await route.handler(request, routeEnv);
+        if (matched !== null && matched !== undefined) {
+          return matched;
+        }
+      }
+
+      if (!this.registry.httpHandler) {
+        return null;
+      }
+
+      return await this.registry.httpHandler(request, routeEnv);
+    });
 
     const emittedEvents = this.takeCommittedEvents();
     const allEmittedEvents = await this.handleCommittedEvents(emittedEvents, undefined, telemetryStart);

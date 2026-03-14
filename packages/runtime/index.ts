@@ -544,7 +544,7 @@ type ChimpbaseCronMethod<TThis, TResult = unknown> = (
 export type ChimpbaseRouteHandler<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry> = (
   request: Request,
   env: ChimpbaseRouteEnv<TActions>,
-) => Response | Promise<Response>;
+) => Response | null | Promise<Response | null>;
 
 export interface ChimpbaseRegistrationTarget {
   bindActionInvoker?(reference: ChimpbaseActionRegistration<any, any, any>): void;
@@ -573,6 +573,7 @@ export interface ChimpbaseRegistrationTarget {
     schedule: string,
     handler: ChimpbaseCronHandler<TResult>,
   ): ChimpbaseCronHandler<TResult>;
+  registerRoute?(name: string, handler: ChimpbaseRouteHandler): ChimpbaseRouteHandler;
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -643,6 +644,23 @@ export interface ChimpbaseCronRegistration<TResult = unknown> {
   telemetry?: ChimpbaseTelemetryPersistOption;
 }
 
+export interface ChimpbaseRouteRegistration<
+  TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry,
+> {
+  handler: ChimpbaseRouteHandler<TActions>;
+  kind: "route";
+  name: string;
+}
+
+export type ChimpbasePluginDependency = string | ChimpbasePluginRegistration;
+
+export interface ChimpbasePluginRegistration {
+  dependsOn?: readonly ChimpbasePluginDependency[];
+  entries: readonly ChimpbaseRegistrationSource[];
+  kind: "plugin";
+  name: string;
+}
+
 export interface ChimpbaseWorkflowRegisteredStep {
   action?: string;
   id: string;
@@ -679,11 +697,14 @@ export interface ChimpbaseVersionedWorkflow<TInput = unknown, TState = unknown> 
 export type ChimpbaseRegistration =
   | ChimpbaseActionRegistration<any, any>
   | ChimpbaseCronRegistration<any>
+  | ChimpbasePluginRegistration
+  | ChimpbaseRouteRegistration<any>
   | ChimpbaseSubscriptionRegistration<any, any>
   | ChimpbaseWorkerRegistration<any, any>
   | ChimpbaseWorkflowRegistration<any, any>;
 
-type ChimpbaseAnyRegistration = ChimpbaseRegistration;
+type ChimpbaseResolvedRegistration = Exclude<ChimpbaseRegistration, ChimpbasePluginRegistration>;
+type ChimpbaseAnyRegistration = ChimpbaseResolvedRegistration;
 export type ChimpbaseRegistrationGroup = readonly ChimpbaseRegistration[];
 export type ChimpbaseRegistrationMap = Record<string, ChimpbaseRegistration | ChimpbaseRegistrationGroup>;
 export type ChimpbaseRegistrationSource =
@@ -729,6 +750,11 @@ type RuntimeGlobals = typeof globalThis & {
 
 interface ChimpbaseActionOptions {
   telemetry?: ChimpbaseTelemetryPersistOption;
+}
+
+export interface ChimpbasePluginOptions {
+  dependsOn?: readonly ChimpbasePluginDependency[];
+  name?: string;
 }
 
 export function runWithActionInvoker<TResult>(
@@ -861,6 +887,49 @@ export function cron<TResult = unknown>(
     name,
     schedule,
     telemetry: options?.telemetry,
+  };
+}
+
+export function route<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry>(
+  name: string,
+  handler: ChimpbaseRouteHandler<TActions>,
+): ChimpbaseRouteRegistration<TActions> {
+  return {
+    handler,
+    kind: "route",
+    name,
+  };
+}
+
+export function plugin(
+  ...entriesOrGroups: ChimpbaseRegistrationSource[]
+): ChimpbasePluginRegistration;
+export function plugin(
+  options: ChimpbasePluginOptions,
+): ChimpbasePluginRegistration;
+export function plugin(
+  options: ChimpbasePluginOptions,
+  ...entriesOrGroups: ChimpbaseRegistrationSource[]
+): ChimpbasePluginRegistration;
+export function plugin(
+  first?: ChimpbasePluginOptions | ChimpbaseRegistrationSource,
+  ...rest: ChimpbaseRegistrationSource[]
+): ChimpbasePluginRegistration {
+  let options: ChimpbasePluginOptions | undefined;
+  let entries: readonly ChimpbaseRegistrationSource[] = [];
+
+  if (isChimpbasePluginOptions(first)) {
+    options = first;
+    entries = rest;
+  } else if (first !== undefined) {
+    entries = [first, ...rest];
+  }
+
+  return {
+    dependsOn: options?.dependsOn,
+    entries,
+    kind: "plugin",
+    name: options?.name ?? "",
   };
 }
 
@@ -1058,48 +1127,34 @@ export function compareWorkflowContracts(
   return compatibility;
 }
 
-function flattenChimpbaseEntries(
+function resolveChimpbaseEntries(
   entriesOrGroups: ReadonlyArray<ChimpbaseRegistrationSource>,
 ): readonly ChimpbaseAnyRegistration[] {
-  const flattened: ChimpbaseAnyRegistration[] = [];
+  const state: ChimpbaseRegistrationResolutionState = {
+    expanded: [],
+    pluginStack: [],
+    visitedPlugins: new Set(),
+    visitingPlugins: new Set(),
+    pluginsByName: new Map(),
+    scannedPlugins: new Set(),
+  };
 
   for (const entryOrGroup of entriesOrGroups) {
-    if (Array.isArray(entryOrGroup)) {
-      flattened.push(...entryOrGroup);
-      continue;
-    }
-
-    if (isChimpbaseRegistration(entryOrGroup)) {
-      flattened.push(entryOrGroup);
-      continue;
-    }
-
-    for (const [key, value] of Object.entries(entryOrGroup)) {
-      if (Array.isArray(value)) {
-        flattened.push(...value);
-        continue;
-      }
-
-      if (!isChimpbaseRegistration(value)) {
-        throw new Error(`invalid registration map entry for key "${key}"`);
-      }
-
-      if (isChimpbaseActionRegistration(value) && !hasChimpbaseActionRegistrationName(value)) {
-        setChimpbaseActionRegistrationName(value, key);
-      }
-
-      flattened.push(value);
-    }
+    scanRegistrationSource(entryOrGroup, state);
   }
 
-  return flattened;
+  for (const entryOrGroup of entriesOrGroups) {
+    expandRegistrationSource(entryOrGroup, state);
+  }
+
+  return state.expanded;
 }
 
 export function register(
   target: ChimpbaseRegistrationTarget,
   ...entriesOrGroups: ChimpbaseRegistrationSource[]
 ): void {
-  for (const entry of flattenChimpbaseEntries(entriesOrGroups)) {
+  for (const entry of resolveChimpbaseEntries(entriesOrGroups)) {
     switch (entry.kind) {
       case "action": {
         const actionName = resolveActionRegistrationName(entry);
@@ -1124,6 +1179,13 @@ export function register(
           target.setTelemetryOverride?.(`cron:${entry.name}`, entry.telemetry);
         }
         break;
+      case "route":
+        if (typeof target.registerRoute !== "function") {
+          throw new Error(`registration target does not support route entries: ${entry.name}`);
+        }
+
+        target.registerRoute(entry.name, entry.handler);
+        break;
       case "subscription":
         target.registerSubscription(
           entry.eventName,
@@ -1147,6 +1209,208 @@ export function register(
         break;
     }
   }
+}
+
+interface ChimpbaseRegistrationResolutionState {
+  expanded: ChimpbaseAnyRegistration[];
+  pluginStack: ChimpbasePluginRegistration[];
+  pluginsByName: Map<string, ChimpbasePluginRegistration>;
+  scannedPlugins: Set<ChimpbasePluginRegistration>;
+  visitedPlugins: Set<ChimpbasePluginRegistration>;
+  visitingPlugins: Set<ChimpbasePluginRegistration>;
+}
+
+function scanRegistrationSource(
+  entryOrGroup: ChimpbaseRegistrationSource,
+  state: ChimpbaseRegistrationResolutionState,
+): void {
+  if (Array.isArray(entryOrGroup)) {
+    for (const entry of entryOrGroup) {
+      scanRegistrationSource(entry, state);
+    }
+    return;
+  }
+
+  if (isChimpbaseRegistration(entryOrGroup)) {
+    scanRegistrationValue(entryOrGroup, state);
+    return;
+  }
+
+  for (const [key, value] of Object.entries(entryOrGroup)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        scanRegistrationSource(entry, state);
+      }
+      continue;
+    }
+
+    if (!isChimpbaseRegistration(value)) {
+      throw new Error(`invalid registration map entry for key "${key}"`);
+    }
+
+    inferRegistrationMapKeyName(value, key);
+    scanRegistrationValue(value, state);
+  }
+}
+
+function scanRegistrationValue(
+  value: ChimpbaseRegistration,
+  state: ChimpbaseRegistrationResolutionState,
+): void {
+  if (isChimpbasePluginRegistration(value)) {
+    scanPluginRegistration(value, state);
+  }
+}
+
+function scanPluginRegistration(
+  pluginRegistration: ChimpbasePluginRegistration,
+  state: ChimpbaseRegistrationResolutionState,
+): void {
+  registerPluginRegistrationName(pluginRegistration, state);
+
+  if (state.scannedPlugins.has(pluginRegistration)) {
+    return;
+  }
+
+  state.scannedPlugins.add(pluginRegistration);
+
+  for (const dependency of pluginRegistration.dependsOn ?? []) {
+    if (typeof dependency === "string") {
+      continue;
+    }
+
+    scanPluginRegistration(dependency, state);
+  }
+
+  for (const entry of pluginRegistration.entries) {
+    scanRegistrationSource(entry, state);
+  }
+}
+
+function expandRegistrationSource(
+  entryOrGroup: ChimpbaseRegistrationSource,
+  state: ChimpbaseRegistrationResolutionState,
+): void {
+  if (Array.isArray(entryOrGroup)) {
+    for (const entry of entryOrGroup) {
+      expandRegistrationSource(entry, state);
+    }
+    return;
+  }
+
+  if (isChimpbaseRegistration(entryOrGroup)) {
+    expandRegistrationValue(entryOrGroup, state);
+    return;
+  }
+
+  for (const [key, value] of Object.entries(entryOrGroup)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        expandRegistrationSource(entry, state);
+      }
+      continue;
+    }
+
+    if (!isChimpbaseRegistration(value)) {
+      throw new Error(`invalid registration map entry for key "${key}"`);
+    }
+
+    inferRegistrationMapKeyName(value, key);
+    expandRegistrationValue(value, state);
+  }
+}
+
+function expandRegistrationValue(
+  value: ChimpbaseRegistration,
+  state: ChimpbaseRegistrationResolutionState,
+): void {
+  if (isChimpbasePluginRegistration(value)) {
+    expandPluginRegistration(value, state);
+    return;
+  }
+
+  state.expanded.push(value);
+}
+
+function expandPluginRegistration(
+  pluginRegistration: ChimpbasePluginRegistration,
+  state: ChimpbaseRegistrationResolutionState,
+): void {
+  if (state.visitedPlugins.has(pluginRegistration)) {
+    return;
+  }
+
+  if (state.visitingPlugins.has(pluginRegistration)) {
+    const cycleStart = state.pluginStack.indexOf(pluginRegistration);
+    const cycle = [...state.pluginStack.slice(cycleStart), pluginRegistration]
+      .map((entry) => formatPluginRegistrationName(entry))
+      .join(" -> ");
+    throw new Error(`circular plugin dependency: ${cycle}`);
+  }
+
+  state.visitingPlugins.add(pluginRegistration);
+  state.pluginStack.push(pluginRegistration);
+
+  for (const dependency of pluginRegistration.dependsOn ?? []) {
+    expandPluginRegistration(resolvePluginDependency(dependency, pluginRegistration, state), state);
+  }
+
+  for (const entry of pluginRegistration.entries) {
+    expandRegistrationSource(entry, state);
+  }
+
+  state.pluginStack.pop();
+  state.visitingPlugins.delete(pluginRegistration);
+  state.visitedPlugins.add(pluginRegistration);
+}
+
+function resolvePluginDependency(
+  dependency: ChimpbasePluginDependency,
+  pluginRegistration: ChimpbasePluginRegistration,
+  state: ChimpbaseRegistrationResolutionState,
+): ChimpbasePluginRegistration {
+  if (typeof dependency !== "string") {
+    return dependency;
+  }
+
+  const resolved = state.pluginsByName.get(dependency);
+  if (!resolved) {
+    throw new Error(
+      `missing plugin dependency: ${formatPluginRegistrationName(pluginRegistration)} -> ${dependency}`,
+    );
+  }
+
+  return resolved;
+}
+
+function inferRegistrationMapKeyName(
+  value: ChimpbaseRegistration,
+  key: string,
+): void {
+  if (isChimpbaseActionRegistration(value) && !hasChimpbaseActionRegistrationName(value)) {
+    setChimpbaseActionRegistrationName(value, key);
+    return;
+  }
+
+  if (isChimpbasePluginRegistration(value) && !hasChimpbasePluginRegistrationName(value)) {
+    setChimpbasePluginRegistrationName(value, key);
+  }
+}
+
+function registerPluginRegistrationName(
+  value: ChimpbasePluginRegistration,
+  state: ChimpbaseRegistrationResolutionState,
+): void {
+  if (!hasChimpbasePluginRegistrationName(value)) {
+    return;
+  }
+
+  const existing = state.pluginsByName.get(value.name);
+  if (existing && existing !== value) {
+    throw new Error(`duplicate plugin name: ${value.name}`);
+  }
+
+  state.pluginsByName.set(value.name, value);
 }
 
 export function registerFrom(
@@ -1565,6 +1829,16 @@ export function isChimpbaseActionRegistration(value: unknown): value is Chimpbas
   );
 }
 
+function isChimpbasePluginRegistration(value: unknown): value is ChimpbasePluginRegistration {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && (value as { kind?: unknown }).kind === "plugin"
+      && typeof (value as { name?: unknown }).name === "string"
+      && "entries" in (value as object),
+  );
+}
+
 function isChimpbaseRegistration(value: unknown): value is ChimpbaseRegistration {
   return Boolean(
     value
@@ -1572,11 +1846,24 @@ function isChimpbaseRegistration(value: unknown): value is ChimpbaseRegistration
       && (
         (value as { kind?: unknown }).kind === "action"
         || (value as { kind?: unknown }).kind === "cron"
+        || (value as { kind?: unknown }).kind === "plugin"
+        || (value as { kind?: unknown }).kind === "route"
         || (value as { kind?: unknown }).kind === "subscription"
         || (value as { kind?: unknown }).kind === "worker"
         || (value as { kind?: unknown }).kind === "workflow"
       ),
   );
+}
+
+function isChimpbasePluginOptions(value: unknown): value is ChimpbasePluginOptions {
+  if (!value || typeof value !== "object" || Array.isArray(value) || "kind" in (value as object)) {
+    return false;
+  }
+
+  const candidate = value as { dependsOn?: unknown; name?: unknown };
+  const hasDependsOn = candidate.dependsOn === undefined || Array.isArray(candidate.dependsOn);
+  const hasName = candidate.name === undefined || typeof candidate.name === "string";
+  return hasDependsOn && hasName && (candidate.dependsOn !== undefined || candidate.name !== undefined);
 }
 
 export function hasChimpbaseActionRegistrationName(
@@ -1591,6 +1878,23 @@ export function setChimpbaseActionRegistrationName(
 ): void {
   if (!name) {
     throw new Error("action registration name cannot be empty");
+  }
+
+  defineRegistrationProperty(value, "name", name);
+}
+
+function hasChimpbasePluginRegistrationName(
+  value: ChimpbasePluginRegistration,
+): boolean {
+  return value.name.length > 0;
+}
+
+function setChimpbasePluginRegistrationName(
+  value: ChimpbasePluginRegistration,
+  name: string,
+): void {
+  if (!name) {
+    throw new Error("plugin registration name cannot be empty");
   }
 
   defineRegistrationProperty(value, "name", name);
@@ -1680,6 +1984,10 @@ function resolveActionRegistrationName(
 
 function formatActionRegistrationName(name: string | undefined): string {
   return name && name.length > 0 ? name : "<unnamed action>";
+}
+
+function formatPluginRegistrationName(registration: ChimpbasePluginRegistration): string {
+  return registration.name.length > 0 ? registration.name : "<unnamed plugin>";
 }
 
 function defineRegistrationProperty<TTarget extends object, TKey extends keyof any>(

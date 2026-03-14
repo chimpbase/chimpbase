@@ -32,7 +32,7 @@ const allowedPortableImports = [
 ] as const;
 
 describe("portable package guards", () => {
-  for (const packageName of ["core", "runtime", "postgres"] as const) {
+  for (const packageName of ["core", "runtime", "postgres", "rest-collections"] as const) {
     test(`@chimpbase/${packageName} stays free of host-specific APIs`, async () => {
       const packageDir = resolve(repoRoot, "packages", packageName);
       const files = await listTypescriptFiles(packageDir);
@@ -84,7 +84,7 @@ describe("portable package guards", () => {
   });
 
   test("published packages do not use workspace protocol for internal runtime dependencies", async () => {
-    const packageDirs = ["bun", "core", "deno", "postgres", "runtime", "tooling"] as const;
+    const packageDirs = ["bun", "core", "deno", "postgres", "rest-collections", "runtime", "tooling"] as const;
     const violations: string[] = [];
 
     for (const packageName of packageDirs) {
@@ -103,7 +103,7 @@ describe("portable package guards", () => {
   });
 
   test("packages consumed by the Deno host publish JavaScript runtime exports", async () => {
-    const packageDirs = ["runtime", "core", "tooling", "postgres", "deno"] as const;
+    const packageDirs = ["runtime", "core", "tooling", "postgres", "rest-collections", "deno"] as const;
     const violations: string[] = [];
 
     for (const packageName of packageDirs) {

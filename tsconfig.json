@@ -19,6 +19,7 @@
       "@chimpbase/deno": ["./packages/deno/src/library.ts"],
       "@chimpbase/node": ["./packages/node/src/library.ts"],
       "@chimpbase/postgres": ["./packages/postgres/src/index.ts"],
+      "@chimpbase/rest-collections": ["./packages/rest-collections/src/index.ts"],
       "@chimpbase/tooling": ["./packages/tooling/src/index.ts"],
       "@chimpbase/tooling/*": ["./packages/tooling/src/*"]
     }
@@ -29,6 +30,7 @@
     "packages/host/**/*.ts",
     "packages/node/**/*.ts",
     "packages/postgres/**/*.ts",
+    "packages/rest-collections/**/*.ts",
     "packages/tooling/**/*.ts",
     "tests/**/*.ts",
     "packages/core/**/*.ts",

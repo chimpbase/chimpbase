@@ -32,6 +32,10 @@ const packageConfigs = {
     dir: "packages/postgres",
     types: ["node"],
   },
+  "rest-collections": {
+    dir: "packages/rest-collections",
+    types: ["node"],
+  },
   runtime: {
     dir: "packages/runtime",
     types: ["node"],

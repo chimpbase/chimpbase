@@ -11,7 +11,7 @@ import {
 } from "../packages/core/index.ts";
 import { createChimpbase } from "../packages/bun/src/library.ts";
 import { ChimpbaseBunHost } from "../packages/bun/src/runtime.ts";
-import { action, v } from "../packages/runtime/index.ts";
+import { action, plugin, route, v } from "../packages/runtime/index.ts";
 
 const runtimeRoot = resolve(import.meta.dir, "..");
 const exampleDir = resolve(runtimeRoot, "examples/bun/todo-ts");
@@ -345,6 +345,103 @@ describe("chimpbase-bun runtime", () => {
 
       const outcome = await host.executeAction("health");
       expect(outcome.result).toEqual({ ok: true });
+    } finally {
+      host.close();
+    }
+  });
+
+  test("resolves plugin routes in DAG order and falls back to the legacy httpHandler", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-plugin-routes-"));
+    cleanupDirs.push(projectDir);
+
+    const trace: string[] = [];
+    const authPlugin = plugin(
+      { name: "authPlugin" },
+      route("auth.guard", async (request) => {
+        const pathname = new URL(request.url).pathname;
+        if (!pathname.startsWith("/api/")) {
+          return null;
+        }
+
+        trace.push(`auth:${pathname}`);
+        return null;
+      }),
+    );
+    const restPlugin = plugin(
+      { dependsOn: [authPlugin] },
+      route("rest.collections", async (request) => {
+        const pathname = new URL(request.url).pathname;
+        if (pathname !== "/api/todo-notes") {
+          return null;
+        }
+
+        trace.push(`rest:${pathname}`);
+        return Response.json({ trace: [...trace] });
+      }),
+    );
+
+    const host = await createChimpbase({
+      app: defineChimpbaseApp({
+        httpHandler: async (request) => {
+          const pathname = new URL(request.url).pathname;
+          if (pathname === "/health") {
+            return Response.json({ ok: true });
+          }
+
+          return null;
+        },
+        project: { name: "plugin-routes" },
+      }),
+      projectDir,
+      storage: {
+        engine: "memory",
+      },
+    });
+
+    try {
+      host.register({ restPlugin });
+
+      const pluginOutcome = await host.executeRoute(new Request("http://plugin.test/api/todo-notes"));
+      expect(pluginOutcome.response?.status).toBe(200);
+      expect(await pluginOutcome.response?.json()).toEqual({
+        trace: [
+          "auth:/api/todo-notes",
+          "rest:/api/todo-notes",
+        ],
+      });
+
+      const healthOutcome = await host.executeRoute(new Request("http://plugin.test/health"));
+      expect(healthOutcome.response?.status).toBe(200);
+      expect(await healthOutcome.response?.json()).toEqual({ ok: true });
+
+      const missingOutcome = await host.executeRoute(new Request("http://plugin.test/missing"));
+      expect(missingOutcome.response).toBeNull();
+    } finally {
+      host.close();
+    }
+  });
+
+  test("rejects circular plugin dependencies", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "chimpbase-bun-plugin-cycle-"));
+    cleanupDirs.push(projectDir);
+
+    const host = await createChimpbase({
+      app: defineChimpbaseApp({
+        project: { name: "plugin-cycle" },
+      }),
+      projectDir,
+      storage: {
+        engine: "memory",
+      },
+    });
+
+    const authPlugin = plugin({ dependsOn: ["restPlugin"], name: "authPlugin" });
+    const restPlugin = plugin({ dependsOn: [authPlugin], name: "restPlugin" });
+
+    try {
+      expect(() => host.register(authPlugin, restPlugin)).toThrow(
+        "circular plugin dependency: authPlugin -> restPlugin -> authPlugin",
+      );
     } finally {
       host.close();
     }

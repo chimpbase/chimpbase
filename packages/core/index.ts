@@ -7,6 +7,7 @@ import type {
   ChimpbaseCronHandler,
   ChimpbaseRegistration,
   ChimpbaseRouteHandler,
+  ChimpbaseRouteRegistration,
   ChimpbaseSubscriptionHandler,
   ChimpbaseSubscriptionOptions,
   ChimpbaseWorkerDefinition,
@@ -179,6 +180,7 @@ export interface ChimpbaseRegistry {
   actions: Map<string, ChimpbaseActionRegistration<any, any, any>>;
   crons: Map<string, ChimpbaseCronRegistration>;
   httpHandler: ChimpbaseRouteHandler | null;
+  routes: ChimpbaseRouteRegistration[];
   subscriptions: Map<string, ChimpbaseSubscriptionEntry[]>;
   telemetryOverrides: Map<string, ChimpbaseTelemetryPersistOverride>;
   workers: Map<string, ChimpbaseWorkerRegistration>;
@@ -211,6 +213,7 @@ export interface ChimpbaseEntrypointTarget {
     schedule: string,
     handler: ChimpbaseCronHandler<TResult>,
   ): ChimpbaseCronHandler<TResult>;
+  registerRoute(name: string, handler: ChimpbaseRouteHandler): ChimpbaseRouteHandler;
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -305,6 +308,7 @@ export function createChimpbaseRegistry(): ChimpbaseRegistry {
     actions: new Map(),
     crons: new Map(),
     httpHandler: null,
+    routes: [],
     subscriptions: new Map(),
     telemetryOverrides: new Map(),
     workers: new Map(),

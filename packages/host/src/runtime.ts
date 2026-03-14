@@ -31,6 +31,7 @@ import {
   describeWorkflow,
   register as registerEntries,
   registerFrom as registerEntriesFrom,
+  route as createRouteEntry,
   resolveChimpbaseActionRegistrationName,
   subscription as createSubscriptionEntry,
   workflow as createWorkflowEntry,
@@ -346,6 +347,13 @@ export class ChimpbaseHost<TServer> {
     return this.register(createCronEntry(name, schedule, handler, options));
   }
 
+  route(
+    name: string,
+    handler: ChimpbaseRouteHandler,
+  ): this {
+    return this.register(createRouteEntry(name, handler));
+  }
+
   workflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): this {
@@ -436,6 +444,18 @@ export class ChimpbaseHost<TServer> {
       schedule,
     });
     this.cronRegistryDirty = true;
+    return handler;
+  }
+
+  registerRoute(
+    name: string,
+    handler: ChimpbaseRouteHandler,
+  ): ChimpbaseRouteHandler {
+    this.registry.routes.push({
+      handler,
+      kind: "route",
+      name,
+    });
     return handler;
   }
 
@@ -939,6 +959,7 @@ function cloneRegistryForWorkerEngine(source: ChimpbaseRegistry): ChimpbaseRegis
     actions: new Map(source.actions),
     crons: new Map(source.crons),
     httpHandler: source.httpHandler,
+    routes: [...source.routes],
     subscriptions: new Map(
       [...source.subscriptions.entries()].map(([eventName, entries]) => [eventName, [...entries]]),
     ),
