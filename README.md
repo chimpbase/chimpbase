@@ -194,9 +194,9 @@ Missed cron backlog is skipped after downtime. The runtime resumes from the curr
 
 Use `workflow(...)` when a business process has to survive time, restarts and retries.
 
-### `query`
+### `ctx.db`
 
-Use raw SQL directly when your domain wants SQL.
+Use `ctx.db.query(...)` for raw SQL and `ctx.db.kysely<T>()` for type-safe queries via Kysely.
 
 ## Examples
 
