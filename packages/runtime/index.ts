@@ -411,12 +411,16 @@ export interface ChimpbaseLogger {
   error(message: string, attributes?: ChimpbaseTelemetryAttributes): void;
 }
 
-export interface ChimpbaseContext<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry> {
-  db<TDatabase = Record<string, never>>(): Kysely<TDatabase>;
+export interface ChimpbaseDbClient {
   query<T = ChimpbaseRow>(
     sql: string,
     params?: readonly unknown[],
   ): Promise<ChimpbaseQueryResult<T>>;
+  kysely<TDatabase = Record<string, never>>(): Kysely<TDatabase>;
+}
+
+export interface ChimpbaseContext<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry> {
+  db: ChimpbaseDbClient;
   pubsub: ChimpbasePubSubClient;
   secret(name: string): string | null;
   kv: ChimpbaseKvClient;
@@ -720,6 +724,7 @@ interface ChimpbaseLegacyDecoratedEntry {
 
 const decoratedEntryStore = new WeakMap<ChimpbaseDecoratedOwner, ChimpbaseAnyRegistration[]>();
 const legacyDecoratedEntryStore = new WeakMap<ChimpbaseDecoratedOwner, ChimpbaseLegacyDecoratedEntry[]>();
+const chimpbaseModuleMarker = new WeakSet<abstract new (...args: any[]) => any>();
 const ACTION_INVOKER_STORAGE_KEY = Symbol.for("@chimpbase/runtime.action_invoker_storage");
 const ACTION_REFERENCE_INVOKERS_KEY = Symbol.for("@chimpbase/runtime.action_reference_invokers");
 const actionInvokerStorage = getActionInvokerStorage();
@@ -1488,6 +1493,24 @@ export function Cron(name: string, schedule: string) {
   };
 }
 
+export function ChimpbaseModule(
+  ...args: unknown[]
+): void {
+  if (isStandardClassDecoratorArgs(args)) {
+    const [value] = args;
+    chimpbaseModuleMarker.add(value);
+    return;
+  }
+
+  if (isLegacyClassDecoratorArgs(args)) {
+    const [target] = args;
+    chimpbaseModuleMarker.add(target);
+    return;
+  }
+
+  throw new Error("@ChimpbaseModule can only be applied to classes");
+}
+
 export function defineAction<TArgs = unknown[], TResult = unknown>(
   name: string,
   handler: ChimpbaseTupleActionHandler<any[], TResult>,
@@ -2048,6 +2071,11 @@ function registerDecoratedMethod(
 
 function collectDecoratedEntries(source: ChimpbaseDecoratedOwner): ChimpbaseAnyRegistration[] {
   if (typeof source === "function") {
+    if (chimpbaseModuleMarker.has(source as abstract new (...args: any[]) => any)) {
+      const instance = new (source as new () => object)();
+      return collectDecoratedEntries(instance);
+    }
+
     return [
       ...(decoratedEntryStore.get(source) ?? []),
       ...collectLegacyDecoratedEntries(source, source),
@@ -2397,4 +2425,23 @@ function isLegacyMethodDecoratorArgs(
     args[2] !== null &&
     "value" in args[2]
   );
+}
+
+function isStandardClassDecoratorArgs(
+  args: unknown[],
+): args is [abstract new (...args: any[]) => any, ClassDecoratorContext] {
+  return (
+    args.length === 2 &&
+    typeof args[0] === "function" &&
+    typeof args[1] === "object" &&
+    args[1] !== null &&
+    "kind" in args[1] &&
+    (args[1] as ClassDecoratorContext).kind === "class"
+  );
+}
+
+function isLegacyClassDecoratorArgs(
+  args: unknown[],
+): args is [abstract new (...args: any[]) => any] {
+  return args.length === 1 && typeof args[0] === "function";
 }

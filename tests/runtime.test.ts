@@ -140,10 +140,10 @@ describe("chimpbase-bun runtime", () => {
     });
     host.registerAction(
       "listAudit",
-      async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
+      async (ctx) => await ctx.db.query("SELECT value FROM worker_audit ORDER BY id ASC"),
     );
     host.registerWorker("audit.job", async (ctx, payload) => {
-      await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+      await ctx.db.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
     });
 
     try {
@@ -572,10 +572,10 @@ describe("chimpbase-bun runtime", () => {
     });
     host.registerAction(
       "listAudit",
-      async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
+      async (ctx) => await ctx.db.query("SELECT value FROM worker_audit ORDER BY id ASC"),
     );
     host.registerWorker("audit.job", async (ctx, payload) => {
-      await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+      await ctx.db.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
     });
 
     try {
@@ -623,11 +623,11 @@ describe("chimpbase-bun runtime", () => {
           ctx.pubsub.publish("audit.created", { value });
           return { queued: value };
         }),
-        action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),
+        action("listAudit", async (ctx) => await ctx.db.query("SELECT value FROM worker_audit ORDER BY id ASC")),
         {
           definition: undefined,
           handler: async (ctx, payload) => {
-            await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+            await ctx.db.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
           },
           kind: "worker",
           name: "audit.job",
@@ -813,7 +813,7 @@ describe("chimpbase-bun runtime", () => {
     host.registerAction(
       "listCronSchedules",
       async (ctx) =>
-        await ctx.query<{ next_fire_at_ms: number }>(
+        await ctx.db.query<{ next_fire_at_ms: number }>(
           "SELECT next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC",
         ),
     );
@@ -998,15 +998,15 @@ describe("chimpbase-bun runtime", () => {
       return { ok: true };
     });
     host.registerAction("prepareAuditTable", async (ctx) => {
-      await ctx.query("CREATE TABLE IF NOT EXISTS async_audit (id INTEGER PRIMARY KEY, value TEXT NOT NULL)");
+      await ctx.db.query("CREATE TABLE IF NOT EXISTS async_audit (id INTEGER PRIMARY KEY, value TEXT NOT NULL)");
       return null;
     });
     host.registerAction(
       "listAudit",
-      async (ctx) => await ctx.query("SELECT value FROM async_audit ORDER BY id ASC"),
+      async (ctx) => await ctx.db.query("SELECT value FROM async_audit ORDER BY id ASC"),
     );
     host.registerSubscription("audit.created", async (ctx, payload) => {
-      await ctx.query("INSERT INTO async_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+      await ctx.db.query("INSERT INTO async_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
     }, { name: "onAuditCreated" });
 
     try {
@@ -1456,13 +1456,13 @@ describe("chimpbase-bun runtime", () => {
         '      if (shouldFail) {',
         '        throw new Error("boom");',
         "      }",
-        "      await ctx.query(",
+        "      await ctx.db.query(",
         '        "INSERT INTO cron_audit (schedule_name, fire_at_ms, fire_at_iso) VALUES (?1, ?2, ?3)",',
         "        [invocation.name, invocation.fireAtMs, invocation.fireAt],",
         "      );",
         "    }),",
-        '    action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms, fire_at_iso FROM cron_audit ORDER BY fire_at_ms ASC")),',
-        '    action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
+        '    action("listCronAudit", async (ctx) => await ctx.db.query("SELECT schedule_name, fire_at_ms, fire_at_iso FROM cron_audit ORDER BY fire_at_ms ASC")),',
+        '    action("listCronSchedules", async (ctx) => await ctx.db.query("SELECT schedule_name, cron_expression, next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
         '    action("setCronFailure", async (ctx, enabled) => {',
         "      if (enabled) {",
         '        await ctx.kv.set("cron:billing.rollup:fail", true);',
@@ -1602,13 +1602,13 @@ describe("chimpbase-bun runtime", () => {
         '  project: { name: "cron-skip-missed-test" },',
         '  registrations: [',
         '    cron("billing.rollup", "*/5 * * * *", async (ctx, invocation) => {',
-        "      await ctx.query(",
+        "      await ctx.db.query(",
         '        "INSERT INTO cron_audit (schedule_name, fire_at_ms, fire_at_iso) VALUES (?1, ?2, ?3)",',
         "        [invocation.name, invocation.fireAtMs, invocation.fireAt],",
         "      );",
         "    }),",
-        '    action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms, fire_at_iso FROM cron_audit ORDER BY fire_at_ms ASC")),',
-        '    action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
+        '    action("listCronAudit", async (ctx) => await ctx.db.query("SELECT schedule_name, fire_at_ms, fire_at_iso FROM cron_audit ORDER BY fire_at_ms ASC")),',
+        '    action("listCronSchedules", async (ctx) => await ctx.db.query("SELECT schedule_name, cron_expression, next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
         "  ],",
         "};",
       ].join("\n"),
@@ -1699,7 +1699,7 @@ describe("chimpbase-bun runtime", () => {
         "    }),",
         "",
         '    worker("todo.explodes.failed", async (ctx, envelope) => {',
-        "      await ctx.query(",
+        "      await ctx.db.query(",
         '        "INSERT INTO dlq_captures (queue_name, error_message, attempts) VALUES (?1, ?2, ?3)",',
         "        [envelope.queue, envelope.error, envelope.attempts],",
         "      );",
@@ -1708,7 +1708,7 @@ describe("chimpbase-bun runtime", () => {
         "    }),",
         "",
         '    action("listDlqCaptures", async (ctx) => {',
-        '      return await ctx.query("SELECT queue_name, error_message, attempts FROM dlq_captures ORDER BY id ASC");',
+        '      return await ctx.db.query("SELECT queue_name, error_message, attempts FROM dlq_captures ORDER BY id ASC");',
         "    }),",
         "  ],",
         "};",
@@ -1755,8 +1755,8 @@ describe("chimpbase-bun runtime", () => {
         "class DecoratedTodoModule {",
         '  @Action("createDecoratedTodo")',
         "  static async create(ctx, title) {",
-        '    await ctx.query("INSERT INTO decorated_todos (title) VALUES (?1)", [title]);',
-        '    const [todo] = await ctx.query("SELECT id, title FROM decorated_todos WHERE id = last_insert_rowid() LIMIT 1");',
+        '    await ctx.db.query("INSERT INTO decorated_todos (title) VALUES (?1)", [title]);',
+        '    const [todo] = await ctx.db.query("SELECT id, title FROM decorated_todos WHERE id = last_insert_rowid() LIMIT 1");',
         '    ctx.pubsub.publish("decorated.created", todo);',
         "    return todo;",
         "  }",
@@ -1768,12 +1768,12 @@ describe("chimpbase-bun runtime", () => {
         "",
         '  @Worker("decorated.audit")',
         "  static async audit(ctx, todo) {",
-        '    await ctx.query("INSERT INTO decorated_audit (todo_id, title) VALUES (?1, ?2)", [todo.id, todo.title]);',
+        '    await ctx.db.query("INSERT INTO decorated_audit (todo_id, title) VALUES (?1, ?2)", [todo.id, todo.title]);',
         "  }",
         "",
         '  @Action("listDecoratedAudit")',
         "  static async listAudit(ctx) {",
-        '    return await ctx.query("SELECT todo_id, title FROM decorated_audit ORDER BY id ASC");',
+        '    return await ctx.db.query("SELECT todo_id, title FROM decorated_audit ORDER BY id ASC");',
         "  }",
         "}",
         "",
@@ -1826,8 +1826,8 @@ describe("chimpbase-bun runtime", () => {
         "class InstanceDecoratedTodoModule {",
         '  @Action("createInstanceDecoratedTodo")',
         "  async create(ctx, title) {",
-        '    await ctx.query("INSERT INTO instance_decorated_todos (title) VALUES (?1)", [title]);',
-        '    const [todo] = await ctx.query("SELECT id, title FROM instance_decorated_todos WHERE id = last_insert_rowid() LIMIT 1");',
+        '    await ctx.db.query("INSERT INTO instance_decorated_todos (title) VALUES (?1)", [title]);',
+        '    const [todo] = await ctx.db.query("SELECT id, title FROM instance_decorated_todos WHERE id = last_insert_rowid() LIMIT 1");',
         '    ctx.pubsub.publish("instance.decorated.created", todo);',
         "    return todo;",
         "  }",
@@ -1839,12 +1839,12 @@ describe("chimpbase-bun runtime", () => {
         "",
         '  @Worker("instance.decorated.audit")',
         "  async audit(ctx, todo) {",
-        '    await ctx.query("INSERT INTO instance_decorated_audit (todo_id, title) VALUES (?1, ?2)", [todo.id, todo.title]);',
+        '    await ctx.db.query("INSERT INTO instance_decorated_audit (todo_id, title) VALUES (?1, ?2)", [todo.id, todo.title]);',
         "  }",
         "",
         '  @Action("listInstanceDecoratedAudit")',
         "  async listAudit(ctx) {",
-        '    return await ctx.query("SELECT todo_id, title FROM instance_decorated_audit ORDER BY id ASC");',
+        '    return await ctx.db.query("SELECT todo_id, title FROM instance_decorated_audit ORDER BY id ASC");',
         "  }",
         "}",
         "",
@@ -1965,10 +1965,10 @@ describe("chimpbase-bun runtime", () => {
         "  },",
         "  registrations: [",
         '    action("createNote", async (ctx, value) => {',
-        '      await ctx.query("INSERT INTO notes (value) VALUES (?1)", [value]);',
+        '      await ctx.db.query("INSERT INTO notes (value) VALUES (?1)", [value]);',
         "      return null;",
         "    }),",
-        '    action("listNotes", async (ctx) => await ctx.query("SELECT value FROM notes ORDER BY id ASC")),',
+        '    action("listNotes", async (ctx) => await ctx.db.query("SELECT value FROM notes ORDER BY id ASC")),',
         "  ],",
         "};",
       ].join("\n"),

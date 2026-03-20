@@ -29,7 +29,7 @@
 
 - Prefer Postgres in production. SQLite and memory are supported for local development and tests.
 - The main DSL primitives are `action`, `subscription`, `worker`, `cron`, and `workflow`.
-- Common runtime context helpers are `ctx.db<TDatabase>()`, `ctx.query`, `ctx.pubsub.publish(...)`, `ctx.queue.enqueue(...)`, `ctx.kv`, `ctx.collection`, `ctx.stream`, `ctx.workflow`, `ctx.secret`, `ctx.log`, `ctx.metric`, `ctx.trace`, and `ctx.action(...)`.
+- Common runtime context helpers are `ctx.db.query(...)`, `ctx.db.kysely<TDatabase>()`, `ctx.pubsub.publish(...)`, `ctx.queue.enqueue(...)`, `ctx.kv`, `ctx.collection`, `ctx.stream`, `ctx.workflow`, `ctx.secret`, `ctx.log`, `ctx.metric`, `ctx.trace`, and `ctx.action(...)`.
 - `subscription(...)` can be marked `idempotent: true` with a stable `name` to deduplicate cross-process delivery.
 - `queue.enqueue(...)` plus `worker(...)` is the durable background job model.
 - `cron(...)` uses standard 5-field UTC cron expressions and runs through the same worker execution path.
@@ -39,8 +39,8 @@
 
 ## Runtime Surface
 
-- `ChimpbaseContext` exposes raw SQL via `ctx.query(...)` and typed Kysely access via `ctx.db<TDatabase>()`.
-- `ctx.db().transaction()` is intentionally unsupported; actions, subscriptions, and queue handlers already run inside runtime-managed transactions.
+- `ChimpbaseContext` exposes raw SQL via `ctx.db.query(...)` and typed Kysely access via `ctx.db.kysely<TDatabase>()`.
+- `ctx.db.kysely().transaction()` is intentionally unsupported; actions, subscriptions, and queue handlers already run inside runtime-managed transactions.
 - Workflow operations used throughout the repo are `ctx.workflow.start(...)`, `ctx.workflow.signal(...)`, and `ctx.workflow.get(...)`.
 - In-memory telemetry is available through `drainTelemetryRecords()` on the host.
 - When telemetry persistence is enabled, the internal streams are `_chimpbase.logs`, `_chimpbase.metrics`, and `_chimpbase.traces`.
@@ -48,7 +48,7 @@
 
 ## Key Entry Points
 
-- [examples/bun/todo-ts/chimpbase.app.ts](examples/bun/todo-ts/chimpbase.app.ts): Canonical explicit app composition using `defineChimpbaseApp(...)` and `registrations`.
+- [examples/bun/todo-ts/chimpbase.app.ts](examples/bun/todo-ts/chimpbase.app.ts): Canonical explicit app composition using a plain object with `registrations`.
 - [examples/bun/todo-ts/chimpbase.migrations.ts](examples/bun/todo-ts/chimpbase.migrations.ts): Example migrations definition.
 - [examples/bun/todo-ts-decorators/chimpbase.app.ts](examples/bun/todo-ts-decorators/chimpbase.app.ts): Decorators-based app composition using `registrationsFrom(...)`.
 - [examples/bun/todo-ts-decorators/src/modules/todos/todo.module.ts](examples/bun/todo-ts-decorators/src/modules/todos/todo.module.ts): Concrete example of `Action`, `Subscription`, and `Worker` decorators in application code.

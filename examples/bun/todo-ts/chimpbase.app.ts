@@ -1,4 +1,4 @@
-import { defineChimpbaseApp } from "@chimpbase/bun";
+import type { ChimpbaseAppDefinitionInput } from "@chimpbase/bun";
 import {
   cron,
   subscription,
@@ -78,11 +78,11 @@ const registrations = [
   seedDemoWorkspace,
 ];
 
-export default defineChimpbaseApp({
+export default {
   httpHandler: todoApiApp,
   migrations,
   project: {
     name: "todo-ts",
   },
   registrations,
-});
+} satisfies ChimpbaseAppDefinitionInput;

@@ -47,7 +47,7 @@ const createCustomer = action({
     plan: v.string(),
   }),
   async handler(ctx, input) {
-    const [customer] = await ctx.query<{ id: number }>(
+    const [customer] = await ctx.db.query<{ id: number }>(
       "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id",
       [input.email, input.name, input.plan],
     );
@@ -69,7 +69,7 @@ chimpbase.register(
   }, { idempotent: true, name: "enqueueCustomerSync" }),
   worker("customer.sync", async (ctx, event) => {
     ctx.log.info("syncing customer", { customerId: event.customerId });
-    await ctx.query(
+    await ctx.db.query(
       "update customers set synced_at = now() where id = ?1",
       [event.customerId],
     );

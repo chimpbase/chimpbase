@@ -28,7 +28,7 @@ const chimpbase = await createChimpbase({
 
 chimpbase
   .action("createCustomer", async (ctx, input) => {
-    const [customer] = await ctx.query<{ id: number }>(
+    const [customer] = await ctx.db.query<{ id: number }>(
       "insert into customers (email, name, plan) values (?1, ?2, ?3) returning id",
       [input.email, input.name, input.plan],
     );
@@ -233,7 +233,7 @@ import {
 } from "@chimpbase/runtime";
 
 const captureTodoBacklogSnapshot = async (ctx, invocation) => {
-  const [summary] = await ctx.query(`
+  const [summary] = await ctx.db.query(`
     SELECT
       COUNT(*) AS total,
       SUM(CASE WHEN status = 'backlog' THEN 1 ELSE 0 END) AS backlog,

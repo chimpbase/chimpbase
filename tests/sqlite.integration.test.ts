@@ -41,7 +41,7 @@ afterEach(async () => {
 });
 
 describe("sqlite integration", () => {
-  test("executes ctx.db() via Kysely while keeping ctx.query() available", async () => {
+  test("executes ctx.db.kysely() via Kysely while keeping ctx.db.query() available", async () => {
     const projectDir = await createKyselyFixture("kysely");
     const host = await ChimpbaseBunHost.load(projectDir);
 
@@ -401,20 +401,20 @@ async function createKyselyFixture(label: string): Promise<string> {
       '  project: { name: "sqlite-kysely-test" },',
       "  registrations: [",
       '    action("createAccount", async (ctx, email, name) => {',
-      "      const db = ctx.db<Database>();",
+      "      const db = ctx.db.kysely<Database>();",
       '      await db.insertInto("accounts").values({ email, name }).execute();',
-      '      const [row] = await ctx.query<{ email: string; name: string }>(',
+      '      const [row] = await ctx.db.query<{ email: string; name: string }>(',
       '        "SELECT email, name FROM accounts WHERE email = ?1",',
       "        [email],",
       "      );",
       "      return row;",
       "    }),",
       '    action("listAccounts", async (ctx) => {',
-      "      const db = ctx.db<Database>();",
+      "      const db = ctx.db.kysely<Database>();",
       '      return await db.selectFrom("accounts").select(["id", "email", "name"]).orderBy("id", "asc").execute();',
       "    }),",
       '    action("createAndFailAccount", async (ctx, email, name) => {',
-      "      const db = ctx.db<Database>();",
+      "      const db = ctx.db.kysely<Database>();",
       '      await db.insertInto("accounts").values({ email, name }).execute();',
       '      throw new Error("boom");',
       "    }),",

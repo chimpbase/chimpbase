@@ -994,7 +994,7 @@ function registerInternalCleanupCrons<TServer>(
       async (ctx) => {
         const cutoffMs = platform.now() - config.telemetry.retention.maxAgeDays * 86_400_000;
         const cutoffTimestamp = new Date(cutoffMs).toISOString();
-        await ctx.query(
+        await ctx.db.query(
           `DELETE FROM _chimpbase_stream_events WHERE stream_name IN ('_chimpbase.logs', '_chimpbase.metrics', '_chimpbase.traces') AND created_at < ?1`,
           [cutoffTimestamp],
         );
@@ -1012,7 +1012,7 @@ function registerInternalCleanupCrons<TServer>(
         const keys = await ctx.kv.list({ prefix: IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX });
 
         for (const key of keys) {
-          const [row] = await ctx.query<{ updated_at: unknown }>(
+          const [row] = await ctx.db.query<{ updated_at: unknown }>(
             "SELECT updated_at FROM _chimpbase_kv WHERE key = ?1 LIMIT 1",
             [key],
           );

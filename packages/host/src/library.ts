@@ -76,7 +76,7 @@ export interface CreateChimpbaseRuntimeOptions {
 }
 
 export interface CreateChimpbaseFromAppOptions extends CreateChimpbaseRuntimeOptions {
-  app: ChimpbaseAppDefinition;
+  app: ChimpbaseAppDefinition | ChimpbaseAppDefinitionInput;
 }
 
 export interface CreateChimpbaseAppFieldsOptions extends CreateChimpbaseRuntimeOptions, ChimpbaseAppDefinitionInput {}
@@ -99,7 +99,7 @@ export interface ChimpbaseRuntimeLibrary<THost, TServer> {
   ) => Promise<THost>) & {
     from(projectDir: string, options?: CreateChimpbaseWithDefaultsOptions): Promise<THost>;
   };
-  loadChimpbaseApp(app: ChimpbaseAppDefinition, options?: LoadChimpbaseAppOptions): Promise<THost>;
+  loadChimpbaseApp(app: ChimpbaseAppDefinition | ChimpbaseAppDefinitionInput, options?: LoadChimpbaseAppOptions): Promise<THost>;
   loadChimpbaseProject(projectDir?: string): Promise<THost>;
   runChimpbaseAction(
     actionName: string,
@@ -107,7 +107,7 @@ export interface ChimpbaseRuntimeLibrary<THost, TServer> {
     options?: { projectDir?: string },
   ): Promise<{ host: THost; outcome: ActionExecutionResult }>;
   runChimpbaseAppAction(
-    app: ChimpbaseAppDefinition,
+    app: ChimpbaseAppDefinition | ChimpbaseAppDefinitionInput,
     actionName: string,
     args?: unknown[] | unknown,
     options?: LoadChimpbaseAppOptions,
@@ -136,7 +136,7 @@ export function createChimpbaseRuntimeLibrary<
   }
 
   async function loadChimpbaseApp(
-    app: ChimpbaseAppDefinition,
+    app: ChimpbaseAppDefinition | ChimpbaseAppDefinitionInput,
     options: LoadChimpbaseAppOptions = {},
   ): Promise<THost> {
     return await createChimpbaseImpl({
@@ -219,7 +219,7 @@ export function createChimpbaseRuntimeLibrary<
   }
 
   async function runChimpbaseAppAction(
-    app: ChimpbaseAppDefinition,
+    app: ChimpbaseAppDefinition | ChimpbaseAppDefinitionInput,
     actionName: string,
     args: unknown[] | unknown = [],
     options: LoadChimpbaseAppOptions = {},
@@ -238,11 +238,12 @@ export function createChimpbaseRuntimeLibrary<
   async function createChimpbaseFromApp(
     options: CreateChimpbaseFromAppOptions,
   ): Promise<THost> {
+    const app = defineChimpbaseApp(options.app);
     const projectDir = resolve(options.projectDir ?? ".");
     const storageEngine = inferStorageEngine(runtime.env, options);
     const config = normalizeProjectConfig({
       project: {
-        name: options.app.project.name,
+        name: app.project.name,
       },
       server: {
         port: options.server?.port ?? inferServerPort(runtime.env),
@@ -253,7 +254,7 @@ export function createChimpbaseRuntimeLibrary<
           ? null
           : options.storage?.path
             ?? runtime.env.get("CHIMPBASE_STORAGE_PATH")
-            ?? join("data", `${options.app.project.name}.db`),
+            ?? join("data", `${app.project.name}.db`),
         url: options.storage?.url
           ?? runtime.env.get("CHIMPBASE_DATABASE_URL")
           ?? runtime.env.get("DATABASE_URL")
@@ -266,24 +267,24 @@ export function createChimpbaseRuntimeLibrary<
         },
       },
       telemetry: {
-        minLevel: options.app.telemetry.minLevel,
-        persist: options.app.telemetry.persist,
+        minLevel: app.telemetry.minLevel,
+        persist: app.telemetry.persist,
         retention: options.telemetryRetention,
       },
       worker: {
         concurrency: options.workerRuntime?.concurrency ?? inferNumberEnv(runtime.env, "CHIMPBASE_WORKER_CONCURRENCY"),
         leaseMs: options.workerRuntime?.leaseMs ?? inferNumberEnv(runtime.env, "CHIMPBASE_WORKER_LEASE_MS"),
-        maxAttempts: options.app.worker.maxAttempts,
+        maxAttempts: app.worker.maxAttempts,
         pollIntervalMs: options.workerRuntime?.pollIntervalMs ?? inferNumberEnv(runtime.env, "CHIMPBASE_WORKER_POLL_INTERVAL_MS"),
-        retryDelayMs: options.app.worker.retryDelayMs,
+        retryDelayMs: app.worker.retryDelayMs,
       },
       workflows: {
-        contractsDir: options.app.workflows.contractsDir ?? undefined,
+        contractsDir: app.workflows.contractsDir ?? undefined,
       },
     });
 
     return await createRuntimeHost(HostClass, runtime, {
-      app: options.app,
+      app,
       config,
       debug: inferDebugEnabled(runtime.env, options.debug),
       migrationsDir: inferMigrationsDir(projectDir, options.migrationsDir ?? runtime.env.get("CHIMPBASE_MIGRATIONS_DIR"), options),

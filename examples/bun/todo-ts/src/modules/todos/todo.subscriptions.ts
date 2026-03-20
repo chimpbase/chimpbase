@@ -6,7 +6,7 @@ function registerTodoAuditSubscription(eventName: string) {
     ctx: ChimpbaseContext,
     todo: TodoRecord,
   ): Promise<void> => {
-    await ctx.query(
+    await ctx.db.query(
       `
         INSERT INTO todo_audit_log (
           event_name,

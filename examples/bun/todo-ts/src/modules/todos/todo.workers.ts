@@ -26,7 +26,7 @@ const notifyTodoCompleted = async (
       projectSlug: todo.project_slug,
     });
 
-    await ctx.query(
+    await ctx.db.query(
       `
         INSERT INTO todo_notifications (
           queue_name,

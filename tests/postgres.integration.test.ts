@@ -250,14 +250,14 @@ if (!dockerAvailable) {
       publisher.registerAction(
         "listQueueJobs",
         async (ctx) =>
-          await ctx.query(
+          await ctx.db.query(
             "SELECT queue_name, attempt_count, status FROM _chimpbase_queue_jobs ORDER BY id ASC",
           ),
       );
       publisher.registerAction(
         "listCustomerSyncAudit",
         async (ctx) =>
-          await ctx.query(
+          await ctx.db.query(
             "SELECT customer_id::double precision AS customer_id FROM customer_sync_audit ORDER BY id ASC",
           ),
       );
@@ -270,7 +270,7 @@ if (!dockerAvailable) {
         { name: "enqueueCustomerSync" },
       );
       workerHost.registerWorker("customer.sync", async (ctx, payload) => {
-        await ctx.query(
+        await ctx.db.query(
           "INSERT INTO customer_sync_audit (customer_id) VALUES (?1)",
           [(payload as { customerId: number }).customerId],
         );
@@ -315,7 +315,7 @@ if (!dockerAvailable) {
       }
     }, 30000);
 
-    test("executes ctx.db() via Kysely while keeping ctx.query() available", async () => {
+    test("executes ctx.db.kysely() via Kysely while keeping ctx.db.query() available", async () => {
       const database = await postgres.createDatabase("kysely");
       const projectDir = await createKyselyFixture("kysely", database.url);
       const host = await createChimpbase.from(projectDir, {
@@ -377,7 +377,7 @@ if (!dockerAvailable) {
       subscriber.registerSubscription(
         "audit.created",
         async (ctx, payload) => {
-          await ctx.query("INSERT INTO idempotent_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+          await ctx.db.query("INSERT INTO idempotent_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
         },
         { idempotent: true, name: "onAuditCreated" },
       );
@@ -387,16 +387,16 @@ if (!dockerAvailable) {
       });
       publisher.registerAction(
         "listAudit",
-        async (ctx) => await ctx.query("SELECT value FROM idempotent_audit ORDER BY id ASC"),
+        async (ctx) => await ctx.db.query("SELECT value FROM idempotent_audit ORDER BY id ASC"),
       );
       publisher.registerAction(
         "listEvents",
-        async (ctx) => await ctx.query("SELECT id::double precision AS id, event_name FROM _chimpbase_events ORDER BY id ASC"),
+        async (ctx) => await ctx.db.query("SELECT id::double precision AS id, event_name FROM _chimpbase_events ORDER BY id ASC"),
       );
       publisher.registerAction(
         "listSeenKeys",
         async (ctx) =>
-          await ctx.query(
+          await ctx.db.query(
             "SELECT key FROM _chimpbase_kv WHERE key LIKE ?1 ORDER BY key ASC",
             ["_chimpbase.sub.seen:%"],
           ),
@@ -491,7 +491,7 @@ if (!dockerAvailable) {
         return null;
       });
       publisher.registerAction("backdateSeenKey", async (ctx, key, updatedAt) => {
-        await ctx.query("UPDATE _chimpbase_kv SET updated_at = ?1 WHERE key = ?2", [updatedAt, key]);
+        await ctx.db.query("UPDATE _chimpbase_kv SET updated_at = ?1 WHERE key = ?2", [updatedAt, key]);
         return null;
       });
 
@@ -1037,20 +1037,20 @@ async function createKyselyFixture(label: string, databaseUrl: string): Promise<
       '  project: { name: "postgres-kysely-test" },',
       "  registrations: [",
       '    action("createAccount", async (ctx, email, name) => {',
-      "      const db = ctx.db<Database>();",
+      "      const db = ctx.db.kysely<Database>();",
       '      await db.insertInto("accounts").values({ email, name }).execute();',
-      '      const [row] = await ctx.query<{ email: string; name: string }>(',
+      '      const [row] = await ctx.db.query<{ email: string; name: string }>(',
       '        "SELECT email, name FROM accounts WHERE email = ?1",',
       "        [email],",
       "      );",
       "      return row;",
       "    }),",
       '    action("listAccounts", async (ctx) => {',
-      "      const db = ctx.db<Database>();",
+      "      const db = ctx.db.kysely<Database>();",
       '      return await db.selectFrom("accounts").select(["id", "email", "name"]).orderBy("id", "asc").execute();',
       "    }),",
       '    action("createAndFailAccount", async (ctx, email, name) => {',
-      "      const db = ctx.db<Database>();",
+      "      const db = ctx.db.kysely<Database>();",
       '      await db.insertInto("accounts").values({ email, name }).execute();',
       '      throw new Error("boom");',
       "    }),",
@@ -1120,10 +1120,10 @@ async function createCronFixture(label: string, databaseUrl: string): Promise<st
       '      if (shouldFail) {',
       '        throw new Error("boom");',
       "      }",
-      '      await ctx.query("INSERT INTO cron_audit (schedule_name, fire_at_ms) VALUES (?1, ?2)", [invocation.name, invocation.fireAtMs]);',
+      '      await ctx.db.query("INSERT INTO cron_audit (schedule_name, fire_at_ms) VALUES (?1, ?2)", [invocation.name, invocation.fireAtMs]);',
       "    }),",
-      '    action("listCronAudit", async (ctx) => await ctx.query("SELECT schedule_name, fire_at_ms::double precision AS fire_at_ms FROM cron_audit ORDER BY fire_at_ms ASC")),',
-      '    action("listCronSchedules", async (ctx) => await ctx.query("SELECT schedule_name, cron_expression, next_fire_at_ms::double precision AS next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
+      '    action("listCronAudit", async (ctx) => await ctx.db.query("SELECT schedule_name, fire_at_ms::double precision AS fire_at_ms FROM cron_audit ORDER BY fire_at_ms ASC")),',
+      '    action("listCronSchedules", async (ctx) => await ctx.db.query("SELECT schedule_name, cron_expression, next_fire_at_ms::double precision AS next_fire_at_ms FROM _chimpbase_cron_schedules ORDER BY schedule_name ASC")),',
       '    action("setCronFailure", async (ctx, enabled) => {',
       "      if (enabled) {",
       '        await ctx.kv.set("cron:billing.rollup:fail", true);',

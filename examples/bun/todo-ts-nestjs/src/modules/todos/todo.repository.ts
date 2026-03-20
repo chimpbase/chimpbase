@@ -60,7 +60,7 @@ export function listTodos(
 
   const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
 
-  return ctx.query<TodoRecord>(
+  return ctx.db.query<TodoRecord>(
     `${TODO_SELECT} ${whereClause} ORDER BY p.name ASC, t.priority DESC, t.id ASC`,
     params,
   );
@@ -70,7 +70,7 @@ export async function findTodoById(
   ctx: ChimpbaseContext,
   todoId: number,
 ): Promise<TodoRecord | null> {
-  const [todo] = await ctx.query<TodoRecord>(
+  const [todo] = await ctx.db.query<TodoRecord>(
     `${TODO_SELECT} WHERE t.id = ?1 LIMIT 1`,
     [todoId],
   );
@@ -94,7 +94,7 @@ export async function insertTodo(
   projectId: number,
   input: NormalizedCreateTodoInput,
 ): Promise<TodoRecord> {
-  const [inserted] = await ctx.query<{ id: number }>(
+  const [inserted] = await ctx.db.query<{ id: number }>(
     `
       INSERT INTO todo_items (
         project_id,
@@ -117,7 +117,7 @@ export async function insertTodo(
   );
 
   const [todo] = inserted
-    ? await ctx.query<TodoRecord>(`${TODO_SELECT} WHERE t.id = ?1 LIMIT 1`, [inserted.id])
+    ? await ctx.db.query<TodoRecord>(`${TODO_SELECT} WHERE t.id = ?1 LIMIT 1`, [inserted.id])
     : [];
 
   if (!todo) {
@@ -132,7 +132,7 @@ export async function updateTodoAssignee(
   todoId: number,
   assigneeEmail: string | null,
 ): Promise<TodoRecord> {
-  await ctx.query(
+  await ctx.db.query(
     `
       UPDATE todo_items
       SET assignee_email = ?1, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
@@ -153,7 +153,7 @@ export async function updateTodoStatus(
     ? "CAST(CURRENT_TIMESTAMP AS TEXT)"
     : "NULL";
 
-  await ctx.query(
+  await ctx.db.query(
     `
       UPDATE todo_items
       SET
@@ -174,7 +174,7 @@ export async function getTodoDashboard(
 ): Promise<TodoDashboard> {
   const params = projectSlug ? [projectSlug] : [];
   const filter = projectSlug ? "WHERE p.slug = ?1" : "";
-  const [dashboard] = await ctx.query<TodoDashboard>(
+  const [dashboard] = await ctx.db.query<TodoDashboard>(
     `
       SELECT
         COUNT(*) AS total,

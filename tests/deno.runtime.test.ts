@@ -417,7 +417,7 @@ if (!dockerAvailable) {
       });
 
       subscriber.registerSubscription("audit.created", async (ctx, payload) => {
-        await ctx.query("INSERT INTO cross_process_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+        await ctx.db.query("INSERT INTO cross_process_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
       });
       publisher.registerAction("publishAudit", async (ctx, value) => {
         ctx.pubsub.publish("audit.created", { value });
@@ -425,7 +425,7 @@ if (!dockerAvailable) {
       });
       publisher.registerAction(
         "listAudit",
-        async (ctx) => await ctx.query("SELECT value FROM cross_process_audit ORDER BY id ASC"),
+        async (ctx) => await ctx.db.query("SELECT value FROM cross_process_audit ORDER BY id ASC"),
       );
 
       const startedSubscriber = subscriber.start({ runWorker: false, serve: false });
@@ -485,10 +485,10 @@ if (!dockerAvailable) {
       });
       host.registerAction(
         "listAudit",
-        async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC"),
+        async (ctx) => await ctx.db.query("SELECT value FROM worker_audit ORDER BY id ASC"),
       );
       host.registerWorker("audit.job", async (ctx, payload) => {
-        await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+        await ctx.db.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
       });
 
       try {
@@ -541,11 +541,11 @@ if (!dockerAvailable) {
             ctx.pubsub.publish("audit.created", { value });
             return { queued: value };
           }),
-          action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),
+          action("listAudit", async (ctx) => await ctx.db.query("SELECT value FROM worker_audit ORDER BY id ASC")),
           {
             definition: undefined,
             handler: async (ctx, payload) => {
-              await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
+              await ctx.db.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload as { value: string }).value]);
             },
             kind: "worker",
             name: "audit.job",
@@ -737,8 +737,8 @@ if (!dockerAvailable) {
           '      await ctx.queue.enqueue("audit.job", { value });',
           "      return null;",
           "    }),",
-          '    action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),',
-          '    { kind: "worker", name: "audit.job", handler: async (ctx, payload) => { await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload).value]); } },',
+          '    action("listAudit", async (ctx) => await ctx.db.query("SELECT value FROM worker_audit ORDER BY id ASC")),',
+          '    { kind: "worker", name: "audit.job", handler: async (ctx, payload) => { await ctx.db.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload).value]); } },',
           "  ],",
           "};",
         ].join("\n"),
@@ -958,9 +958,9 @@ async function createDenoProjectFixture(label: string, databaseUrl: string): Pro
       '      await ctx.queue.enqueue("audit.job", { value });',
       '      return { queued: value };',
       "    }),",
-      '    action("listAudit", async (ctx) => await ctx.query("SELECT value FROM worker_audit ORDER BY id ASC")),',
+      '    action("listAudit", async (ctx) => await ctx.db.query("SELECT value FROM worker_audit ORDER BY id ASC")),',
       '    worker("audit.job", async (ctx, payload) => {',
-      '      await ctx.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload).value]);',
+      '      await ctx.db.query("INSERT INTO worker_audit (value) VALUES (?1)", [(payload).value]);',
       "    }),",
       "  ],",
       "};",

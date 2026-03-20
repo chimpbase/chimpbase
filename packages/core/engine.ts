@@ -780,10 +780,12 @@ export class ChimpbaseEngine {
     };
 
     return {
-      db: <TDatabase = Record<string, never>>() =>
-        this.adapter.createKysely<TDatabase>(),
-      query: <T = Record<string, unknown>>(sql: string, params: readonly unknown[] = []) =>
-        this.adapter.query<T>(sql, params),
+      db: {
+        query: <T = Record<string, unknown>>(sql: string, params: readonly unknown[] = []) =>
+          this.adapter.query<T>(sql, params),
+        kysely: <TDatabase = Record<string, never>>() =>
+          this.adapter.createKysely<TDatabase>(),
+      },
       pubsub: {
         publish: (topic: string, payload: unknown) => {
           publishEvent(topic, payload);

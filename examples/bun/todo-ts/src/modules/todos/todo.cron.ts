@@ -12,7 +12,7 @@ const captureTodoBacklogSnapshot = async (
   ctx: ChimpbaseContext,
   invocation: ChimpbaseCronInvocation,
 ): Promise<void> => {
-  const [summary] = await ctx.query<TodoDashboard>(
+  const [summary] = await ctx.db.query<TodoDashboard>(
     `
       SELECT
         COUNT(*) AS total,

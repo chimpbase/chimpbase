@@ -54,15 +54,15 @@ class ChimpbaseKyselyDriver implements Driver {
   }
 
   async beginTransaction(_connection: DatabaseConnection, _settings: TransactionSettings): Promise<void> {
-    throw new Error("ctx.db().transaction() is not supported; actions, subscriptions and queues already run inside runtime-managed transactions");
+    throw new Error("ctx.db.kysely().transaction() is not supported; actions, subscriptions and queues already run inside runtime-managed transactions");
   }
 
   async commitTransaction(_connection: DatabaseConnection): Promise<void> {
-    throw new Error("ctx.db().transaction() is not supported; actions, subscriptions and queues already run inside runtime-managed transactions");
+    throw new Error("ctx.db.kysely().transaction() is not supported; actions, subscriptions and queues already run inside runtime-managed transactions");
   }
 
   async rollbackTransaction(_connection: DatabaseConnection): Promise<void> {
-    throw new Error("ctx.db().transaction() is not supported; actions, subscriptions and queues already run inside runtime-managed transactions");
+    throw new Error("ctx.db.kysely().transaction() is not supported; actions, subscriptions and queues already run inside runtime-managed transactions");
   }
 
   async releaseConnection(_connection: DatabaseConnection): Promise<void> {}

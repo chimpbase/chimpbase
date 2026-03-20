@@ -8,7 +8,7 @@ import type {
 const listTodoAuditLog = async (
   ctx: ChimpbaseContext,
 ): Promise<TodoAuditRecord[]> => {
-  return await ctx.query<TodoAuditRecord>(
+  return await ctx.db.query<TodoAuditRecord>(
     `
       SELECT
         id,
@@ -28,7 +28,7 @@ const listTodoAuditLog = async (
 const listTodoEvents = async (
   ctx: ChimpbaseContext,
 ): Promise<TodoEventRecord[]> => {
-  return await ctx.query<TodoEventRecord>(
+  return await ctx.db.query<TodoEventRecord>(
     "SELECT id, event_name, payload_json, created_at FROM _chimpbase_events ORDER BY id ASC",
   );
 };
@@ -36,7 +36,7 @@ const listTodoEvents = async (
 const listTodoNotifications = async (
   ctx: ChimpbaseContext,
 ): Promise<TodoNotificationRecord[]> => {
-  return await ctx.query<TodoNotificationRecord>(
+  return await ctx.db.query<TodoNotificationRecord>(
     `
       SELECT
         id,

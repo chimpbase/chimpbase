@@ -1,46 +1,48 @@
-import type { ChimpbaseContext } from "@chimpbase/runtime";
+import type { ChimpbaseDbClient } from "@chimpbase/runtime";
 import type {
   NormalizedProjectInput,
   ProjectRecord,
 } from "./project.types.ts";
 
-export async function listProjects(ctx: ChimpbaseContext): Promise<ProjectRecord[]> {
-  return await ctx.query<ProjectRecord>(
-    "SELECT id, slug, name, owner_email, created_at FROM projects ORDER BY name ASC",
-  );
-}
-
-export async function findProjectBySlug(
-  ctx: ChimpbaseContext,
-  slug: string,
-): Promise<ProjectRecord | null> {
-  const [project] = await ctx.query<ProjectRecord>(
-    "SELECT id, slug, name, owner_email, created_at FROM projects WHERE slug = ?1 LIMIT 1",
-    [slug],
-  );
-  return project ?? null;
-}
-
-export async function requireProjectBySlug(
-  ctx: ChimpbaseContext,
-  slug: string,
-): Promise<ProjectRecord> {
-  const project = await findProjectBySlug(ctx, slug);
-  if (!project) {
-    throw new Error(`project not found: ${slug}`);
+export class ProjectRepository {
+  async list(db: ChimpbaseDbClient): Promise<ProjectRecord[]> {
+    return await db.query<ProjectRecord>(
+      "SELECT id, slug, name, owner_email, created_at FROM projects ORDER BY name ASC",
+    );
   }
 
-  return project;
-}
+  async findBySlug(
+    db: ChimpbaseDbClient,
+    slug: string,
+  ): Promise<ProjectRecord | null> {
+    const [project] = await db.query<ProjectRecord>(
+      "SELECT id, slug, name, owner_email, created_at FROM projects WHERE slug = ?1 LIMIT 1",
+      [slug],
+    );
+    return project ?? null;
+  }
 
-export async function insertProject(
-  ctx: ChimpbaseContext,
-  input: NormalizedProjectInput,
-): Promise<ProjectRecord> {
-  await ctx.query(
-    "INSERT INTO projects (slug, name, owner_email) VALUES (?1, ?2, ?3)",
-    [input.slug, input.name, input.ownerEmail],
-  );
+  async requireBySlug(
+    db: ChimpbaseDbClient,
+    slug: string,
+  ): Promise<ProjectRecord> {
+    const project = await this.findBySlug(db, slug);
+    if (!project) {
+      throw new Error(`project not found: ${slug}`);
+    }
 
-  return await requireProjectBySlug(ctx, input.slug);
+    return project;
+  }
+
+  async insert(
+    db: ChimpbaseDbClient,
+    input: NormalizedProjectInput,
+  ): Promise<ProjectRecord> {
+    await db.query(
+      "INSERT INTO projects (slug, name, owner_email) VALUES (?1, ?2, ?3)",
+      [input.slug, input.name, input.ownerEmail],
+    );
+
+    return await this.requireBySlug(db, input.slug);
+  }
 }

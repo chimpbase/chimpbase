@@ -11,7 +11,7 @@ import {
   type SyncChimpbaseSchemaOptions,
   type SyncChimpbaseWorkflowContractsOptions,
 } from "@chimpbase/host";
-import { defineChimpbaseApp, type ChimpbaseAppDefinition, type ChimpbaseAppDefinitionInput } from "@chimpbase/core";
+import type { ChimpbaseAppDefinition, ChimpbaseAppDefinitionInput } from "@chimpbase/core";
 
 import { nodeRuntimeShim, ChimpbaseNodeHost, type ActionExecutionResult, type NodeServeHandle } from "./runtime.ts";
 
@@ -42,7 +42,6 @@ export const syncChimpbaseSchema = runtimeLibrary.syncChimpbaseSchema;
 export const syncChimpbaseWorkflowContracts = runtimeLibrary.syncChimpbaseWorkflowContracts;
 
 export {
-  defineChimpbaseApp,
   type ActionExecutionResult,
   type ChimpbaseAppDefinition,
   type ChimpbaseAppDefinitionInput,

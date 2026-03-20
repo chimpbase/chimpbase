@@ -1,8 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-import { defineChimpbaseApp } from "@chimpbase/bun";
-import { createChimpbase } from "@chimpbase/bun";
+import { createChimpbase, type ChimpbaseAppDefinitionInput } from "@chimpbase/bun";
 import { action, type ChimpbaseWorkerHandler, v, worker } from "@chimpbase/runtime";
 
 type BenchmarkMode = "action" | "queue-burst" | "queue-steady" | "both";
@@ -50,7 +49,7 @@ const insertActionRecord = action({
     runId: v.string(),
   }),
   async handler(ctx, input) {
-    await ctx.query(
+    await ctx.db.query(
       `
         INSERT INTO load_test_actions (
           operation_id,
@@ -69,8 +68,8 @@ const insertActionRecord = action({
 
 const resetLoadTestData = action({
   async handler(ctx) {
-    await ctx.query("DELETE FROM load_test_actions");
-    await ctx.query("DELETE FROM load_test_queue_jobs");
+    await ctx.db.query("DELETE FROM load_test_actions");
+    await ctx.db.query("DELETE FROM load_test_queue_jobs");
     return null;
   },
   name: "resetLoadTestData",
@@ -83,7 +82,7 @@ const enqueueQueueJob = action({
     runId: v.string(),
   }),
   async handler(ctx, input) {
-    await ctx.query(
+    await ctx.db.query(
       `
         INSERT INTO load_test_queue_jobs (
           operation_id,
@@ -131,7 +130,7 @@ const countProcessedQueueJobs = action({
     runId: v.string(),
   }),
   async handler(ctx, input) {
-    const [row] = await ctx.query<{ processed_count: number | string }>(
+    const [row] = await ctx.db.query<{ processed_count: number | string }>(
       `
         SELECT COUNT(*) AS processed_count
         FROM load_test_queue_jobs
@@ -151,7 +150,7 @@ const listQueueLatencies = action({
     runId: v.string(),
   }),
   async handler(ctx, input) {
-    const rows = await ctx.query<{ latency_ms: number | string }>(
+    const rows = await ctx.db.query<{ latency_ms: number | string }>(
       `
         SELECT processed_at_ms - enqueued_at_ms AS latency_ms
         FROM load_test_queue_jobs
@@ -168,7 +167,7 @@ const listQueueLatencies = action({
 });
 
 const processQueueJob: ChimpbaseWorkerHandler<QueueJobPayload, void> = async (ctx, payload) => {
-  await ctx.query(
+  await ctx.db.query(
     `
       UPDATE load_test_queue_jobs
       SET processed_at_ms = ?1
@@ -178,7 +177,7 @@ const processQueueJob: ChimpbaseWorkerHandler<QueueJobPayload, void> = async (ct
   );
 };
 
-export const loadTestApp = defineChimpbaseApp({
+export const loadTestApp = {
   migrations: {
     postgres: [
       {
@@ -250,7 +249,7 @@ export const loadTestApp = defineChimpbaseApp({
   worker: {
     retryDelayMs: 0,
   },
-});
+} satisfies ChimpbaseAppDefinitionInput;
 
 async function createLoadTestHost(options: LoadTestOptions) {
   const sqlitePath = resolve(import.meta.dir, options.sqlitePath);

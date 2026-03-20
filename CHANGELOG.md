@@ -57,7 +57,7 @@ Initial public alpha release of the Chimpbase monorepo.
 - `@chimpbase/core` with the execution engine and host contracts
 - Postgres-first runtime support with SQLite support for local development and tests
 - durable workflows with versioned workflow contracts
-- `ctx.db()` backed by Kysely while keeping `ctx.query()` available
+- `ctx.db.kysely()` backed by Kysely while keeping `ctx.db.query()` available
 - schema generation and schema check commands for Postgres migrations
 - Bun examples under `examples/bun/*`
 

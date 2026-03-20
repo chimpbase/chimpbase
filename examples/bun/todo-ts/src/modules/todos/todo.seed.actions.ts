@@ -57,7 +57,7 @@ const seedDemoWorkspace = action({
 
     const createdTodos: TodoRecord[] = [];
     for (const todoInput of todos) {
-      const existing = await ctx.query<TodoRecord>(
+      const existing = await ctx.db.query<TodoRecord>(
         `
           SELECT
             t.id,
