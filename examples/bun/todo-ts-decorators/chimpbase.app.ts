@@ -1,4 +1,4 @@
-import type { ChimpbaseAppDefinitionInput } from "@chimpbase/bun";
+import { createChimpbase } from "@chimpbase/bun";
 import { registrationsFrom } from "@chimpbase/runtime";
 
 import migrations from "./chimpbase.migrations.ts";
@@ -14,11 +14,12 @@ const todoRepository = new TodoRepository();
 const projectModule = new ProjectModule(projectRepository);
 const todoModule = new TodoModule(todoRepository, projectRepository);
 
-export default {
+export const chimpbase = await createChimpbase({
   httpHandler: todoApiApp,
   migrations,
   project: {
     name: "todo-ts-decorators",
   },
   registrations: registrationsFrom(projectModule, todoModule),
-} satisfies ChimpbaseAppDefinitionInput;
+  projectDir: import.meta.dir,
+});
