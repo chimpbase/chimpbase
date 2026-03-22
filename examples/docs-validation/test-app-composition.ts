@@ -6,6 +6,6 @@ const syncHandler = async (_ctx: any, _event: any) => {};
 const syncCustomer = async (_ctx: any, _payload: any) => {};
 const generateDailyReport = async (_ctx: any) => {};
 const appDef = { project: { name: "my-app" }, registrations: [createCustomer, listCustomers, subscription("customer.created", syncHandler, { idempotent: true, name: "enqueueSync" }), worker("customer.sync", syncCustomer), cron("reports.daily", "0 9 * * *", generateDailyReport)] } satisfies ChimpbaseAppDefinitionInput;
-class TodoModule { @Action({ name: "createTodoDeco", args: v.object({ title: v.string() }) }) async createTodo(_ctx: any, input: any) { return input; } @Subscription("todo.created", { idempotent: true, name: "decoAuditTodo" }) async auditTodoCreated(_ctx: any, _event: any) {} @Worker("todo.notify") async notifyTodoCompleted(_ctx: any, _payload: any) {} @Cron("backlog.snapshot", "*/15 * * * *") async captureSnapshot(_ctx: any, _invocation: any) {} }
+class TodoModule { @Action("createTodoDeco") async createTodo(_ctx: any, input: any) { return input; } @Subscription("todo.created") async auditTodoCreated(_ctx: any, _event: any) {} @Worker("todo.notify") async notifyTodoCompleted(_ctx: any, _payload: any) {} @Cron("backlog.snapshot", "*/15 * * * *") async captureSnapshot(_ctx: any, _invocation: any) {} }
 const decoApp = { project: { name: "my-app" }, registrations: registrationsFrom(TodoModule) } satisfies ChimpbaseAppDefinitionInput;
 console.log("app-composition: OK (regular:", appDef != null, "decorators:", decoApp != null, ")");
