@@ -80,6 +80,13 @@
         "tslib": "^2.8.1",
       },
     },
+    "examples/docs-validation": {
+      "name": "@chimpbase/docs-validation",
+      "dependencies": {
+        "@chimpbase/bun": "workspace:*",
+        "@chimpbase/runtime": "workspace:*",
+      },
+    },
     "examples/load-test": {
       "name": "@chimpbase/example-load-test",
       "dependencies": {
@@ -91,16 +98,16 @@
     },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
       "dependencies": {
-        "@chimpbase/core": "0.1.24",
-        "@chimpbase/host": "0.1.24",
-        "@chimpbase/postgres": "0.1.24",
-        "@chimpbase/runtime": "0.1.24",
-        "@chimpbase/tooling": "0.1.24",
+        "@chimpbase/core": "0.1.28",
+        "@chimpbase/host": "0.1.28",
+        "@chimpbase/postgres": "0.1.28",
+        "@chimpbase/runtime": "0.1.28",
+        "@chimpbase/tooling": "0.1.28",
         "kysely": "^0.28.11",
       },
       "devDependencies": {
@@ -111,15 +118,15 @@
     },
     "packages/core": {
       "name": "@chimpbase/core",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "dependencies": {
-        "@chimpbase/runtime": "0.1.24",
+        "@chimpbase/runtime": "0.1.28",
         "kysely": "^0.28.11",
       },
     },
     "packages/deno": {
       "name": "@chimpbase/deno",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "dependencies": {
         "@chimpbase/core": "0.1.24",
         "@chimpbase/host": "0.1.24",
@@ -134,18 +141,18 @@
     },
     "packages/host": {
       "name": "@chimpbase/host",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "dependencies": {
-        "@chimpbase/core": "0.1.24",
-        "@chimpbase/postgres": "0.1.24",
-        "@chimpbase/runtime": "0.1.24",
-        "@chimpbase/tooling": "0.1.24",
+        "@chimpbase/core": "0.1.28",
+        "@chimpbase/postgres": "0.1.28",
+        "@chimpbase/runtime": "0.1.28",
+        "@chimpbase/tooling": "0.1.28",
         "kysely": "^0.28.11",
       },
     },
     "packages/node": {
       "name": "@chimpbase/node",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "bin": {
         "chimpbase-node": "./dist/src/cli.js",
       },
@@ -164,10 +171,10 @@
     },
     "packages/postgres": {
       "name": "@chimpbase/postgres",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "dependencies": {
-        "@chimpbase/core": "0.1.24",
-        "@chimpbase/runtime": "0.1.24",
+        "@chimpbase/core": "0.1.28",
+        "@chimpbase/runtime": "0.1.28",
         "kysely": "^0.28.11",
         "pg": "^8.16.3",
       },
@@ -178,24 +185,24 @@
     },
     "packages/rest-collections": {
       "name": "@chimpbase/rest-collections",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "dependencies": {
         "@chimpbase/runtime": "0.1.27",
       },
     },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "dependencies": {
         "kysely": "^0.28.11",
       },
     },
     "packages/tooling": {
       "name": "@chimpbase/tooling",
-      "version": "0.1.27",
+      "version": "0.1.28",
       "dependencies": {
-        "@chimpbase/core": "0.1.24",
-        "@chimpbase/runtime": "0.1.24",
+        "@chimpbase/core": "0.1.28",
+        "@chimpbase/runtime": "0.1.28",
         "kysely": "^0.28.11",
         "pg": "^8.16.3",
       },
@@ -209,6 +216,8 @@
     "@chimpbase/core": ["@chimpbase/core@workspace:packages/core"],
 
     "@chimpbase/deno": ["@chimpbase/deno@workspace:packages/deno"],
+
+    "@chimpbase/docs-validation": ["@chimpbase/docs-validation@workspace:examples/docs-validation"],
 
     "@chimpbase/example-load-test": ["@chimpbase/example-load-test@workspace:examples/load-test"],
 

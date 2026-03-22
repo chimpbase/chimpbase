@@ -1,0 +1,9 @@
+{
+  "name": "@chimpbase/docs-validation",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@chimpbase/bun": "workspace:*",
+    "@chimpbase/runtime": "workspace:*"
+  }
+}
