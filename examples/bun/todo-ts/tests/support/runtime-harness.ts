@@ -9,6 +9,8 @@ const chimpbaseBunPackageDir = resolve(repoRoot, "packages/bun");
 const chimpbaseHostPackageDir = resolve(repoRoot, "packages/host");
 const chimpbasePostgresPackageDir = resolve(repoRoot, "packages/postgres");
 const chimpbaseToolingPackageDir = resolve(repoRoot, "packages/tooling");
+const chimpbaseAuthPackageDir = resolve(repoRoot, "packages/auth");
+const chimpbaseWebhooksPackageDir = resolve(repoRoot, "packages/webhooks");
 const workspaceNodeModulesDir = resolve(repoRoot, "node_modules");
 const chimpbaseCorePackageDir = resolve(repoRoot, "packages/core");
 const runtimePackageDir = resolve(repoRoot, "packages/runtime");
@@ -61,10 +63,12 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
       {
         private: true,
         dependencies: {
+          "@chimpbase/auth": "file:./node_modules/@chimpbase/auth",
           "@chimpbase/core": "file:./node_modules/@chimpbase/core",
           "@chimpbase/runtime": "file:./node_modules/@chimpbase/runtime",
           "@chimpbase/bun": "file:./node_modules/@chimpbase/bun",
           "@chimpbase/tooling": "file:./node_modules/@chimpbase/tooling",
+          "@chimpbase/webhooks": "file:./node_modules/@chimpbase/webhooks",
           hono: "^4.12.5",
           kysely: "^0.28.11",
         },
@@ -107,6 +111,16 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
     });
     await cp(resolve(chimpbaseToolingPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/tooling/package.json"));
     await copyDirectoryIfExists(resolve(chimpbaseToolingPackageDir, "dist"), resolve(projectDir, "node_modules/@chimpbase/tooling/dist"));
+    await cp(resolve(chimpbaseAuthPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/auth/src"), {
+      recursive: true,
+    });
+    await cp(resolve(chimpbaseAuthPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/auth/package.json"));
+    await copyDirectoryIfExists(resolve(chimpbaseAuthPackageDir, "dist"), resolve(projectDir, "node_modules/@chimpbase/auth/dist"));
+    await cp(resolve(chimpbaseWebhooksPackageDir, "src"), resolve(projectDir, "node_modules/@chimpbase/webhooks/src"), {
+      recursive: true,
+    });
+    await cp(resolve(chimpbaseWebhooksPackageDir, "package.json"), resolve(projectDir, "node_modules/@chimpbase/webhooks/package.json"));
+    await copyDirectoryIfExists(resolve(chimpbaseWebhooksPackageDir, "dist"), resolve(projectDir, "node_modules/@chimpbase/webhooks/dist"));
 
     await cp(resolve(workspaceNodeModulesDir, "hono"), resolve(projectDir, "node_modules", "hono"), {
       recursive: true,
@@ -123,6 +137,7 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
   }
 
   await mkdir(resolve(projectDir, "data"), { recursive: true });
+  await writeFile(resolve(projectDir, ".env"), "CHIMPBASE_BOOTSTRAP_API_KEY=test-bootstrap-key\n");
 
   return {
     port,
@@ -132,6 +147,9 @@ export async function createProjectFixture(label: string): Promise<ProjectFixtur
     },
   };
 }
+
+export const TEST_API_KEY = "test-bootstrap-key";
+export const TEST_AUTH_HEADERS = { "X-API-Key": TEST_API_KEY } as const;
 
 export async function runAction(
   projectDir: string,

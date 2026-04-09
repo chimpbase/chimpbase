@@ -32,6 +32,8 @@ export async function loadProjectConfig(
   const subscriptions = getTable(parsed, "subscriptions");
   const subscriptionsIdempotency = getTable(subscriptions, "idempotency");
   const subscriptionsIdempotencyRetention = getTable(subscriptionsIdempotency, "retention");
+  const kv = getTable(parsed, "kv");
+  const kvRetention = getTable(kv, "retention");
   const workflows = getTable(parsed, "workflows");
   const telemetry = getTable(parsed, "telemetry");
   const telemetryPersist = getTable(telemetry, "persist");
@@ -80,6 +82,12 @@ export async function loadProjectConfig(
         enabled: readBoolean(telemetryRetention, "enabled"),
         maxAgeDays: readNumber(telemetryRetention, "max_age_days"),
         schedule: readString(telemetryRetention, "schedule"),
+      },
+    },
+    kv: {
+      retention: {
+        enabled: readBoolean(kvRetention, "enabled"),
+        schedule: readString(kvRetention, "schedule"),
       },
     },
     workflows: {

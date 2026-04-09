@@ -2,10 +2,12 @@
   "name": "@chimpbase/example-todo-ts",
   "private": true,
   "dependencies": {
+    "@chimpbase/auth": "workspace:*",
     "@chimpbase/core": "workspace:*",
     "@chimpbase/runtime": "workspace:*",
     "@chimpbase/bun": "workspace:*",
     "@chimpbase/tooling": "workspace:*",
+    "@chimpbase/webhooks": "workspace:*",
     "hono": "^4.12.5"
   },
   "scripts": {

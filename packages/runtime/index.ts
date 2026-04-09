@@ -342,11 +342,15 @@ export interface ChimpbaseKvListOptions {
   prefix?: string;
 }
 
+export interface ChimpbaseKvSetOptions {
+  ttlMs?: number;
+}
+
 export interface ChimpbaseKvClient {
   delete(key: string): Promise<void>;
   get<TValue = unknown>(key: string): Promise<TValue | null>;
   list(options?: ChimpbaseKvListOptions): Promise<string[]>;
-  set<TValue = unknown>(key: string, value: TValue): Promise<void>;
+  set<TValue = unknown>(key: string, value: TValue, options?: ChimpbaseKvSetOptions): Promise<void>;
 }
 
 export interface ChimpbaseCollectionFindOptions {

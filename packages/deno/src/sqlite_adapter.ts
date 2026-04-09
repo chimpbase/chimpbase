@@ -125,7 +125,8 @@ export async function ensureSqliteInternalTables(db: SqliteDatabase): Promise<vo
       CREATE TABLE IF NOT EXISTS _chimpbase_kv (
         key TEXT PRIMARY KEY,
         value_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT DEFAULT NULL
       );
     `,
   );
@@ -243,6 +244,12 @@ export async function ensureSqliteInternalTables(db: SqliteDatabase): Promise<vo
 
   try {
     db.exec("ALTER TABLE _chimpbase_workflow_instances ADD COLUMN current_step_id TEXT");
+  } catch {
+    // Column already exists on upgraded databases.
+  }
+
+  try {
+    db.exec("ALTER TABLE _chimpbase_kv ADD COLUMN expires_at TEXT DEFAULT NULL");
   } catch {
     // Column already exists on upgraded databases.
   }
@@ -549,7 +556,7 @@ export function createSqliteEngineAdapter(
         `
           SELECT value_json
           FROM _chimpbase_kv
-          WHERE key = ?1
+          WHERE key = ?1 AND (expires_at IS NULL OR expires_at > datetime('now'))
           LIMIT 1
         `,
       ).all(key) as Array<{ value_json: string }>;
@@ -561,22 +568,24 @@ export function createSqliteEngineAdapter(
         `
           SELECT key
           FROM _chimpbase_kv
-          WHERE key LIKE ?1
+          WHERE key LIKE ?1 AND (expires_at IS NULL OR expires_at > datetime('now'))
           ORDER BY key ASC
         `,
       ).all(`${prefix}%`) as Array<{ key: string }>;
       return rows.map((row) => row.key);
     },
-    async kvSet<TValue = unknown>(key: string, value: TValue) {
+    async kvSet<TValue = unknown>(key: string, value: TValue, ttlMs?: number) {
+      const expiresAt = ttlMs !== undefined ? new Date(Date.now() + ttlMs).toISOString() : null;
       db.query(
         `
-          INSERT INTO _chimpbase_kv (key, value_json, updated_at)
-          VALUES (?1, ?2, CURRENT_TIMESTAMP)
+          INSERT INTO _chimpbase_kv (key, value_json, updated_at, expires_at)
+          VALUES (?1, ?2, CURRENT_TIMESTAMP, ?3)
           ON CONFLICT(key) DO UPDATE SET
             value_json = excluded.value_json,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP,
+            expires_at = excluded.expires_at
         `,
-      ).run(key, JSON.stringify(value ?? null));
+      ).run(key, JSON.stringify(value ?? null), expiresAt);
     },
     async listCronSchedules(): Promise<PersistedCronScheduleRow[]> {
       return db.query(

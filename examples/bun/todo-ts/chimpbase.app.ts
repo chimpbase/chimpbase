@@ -1,4 +1,6 @@
 import type { ChimpbaseAppDefinitionInput } from "@chimpbase/bun";
+import { chimpbaseAuth } from "@chimpbase/auth";
+import { chimpbaseWebhooks } from "@chimpbase/webhooks";
 import {
   cron,
   subscription,
@@ -49,6 +51,13 @@ import {
 import { seedDemoWorkspace } from "./src/modules/todos/todo.seed.actions.ts";
 
 const registrations = [
+  chimpbaseAuth({
+    bootstrapKeySecret: "CHIMPBASE_BOOTSTRAP_API_KEY",
+    excludePaths: ["/health"],
+  }),
+  chimpbaseWebhooks({
+    allowedEvents: ["todo.created", "todo.assigned", "todo.started", "todo.completed"],
+  }),
   listProjects,
   createProject,
   listTodos,

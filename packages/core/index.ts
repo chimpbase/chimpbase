@@ -58,6 +58,9 @@ export interface ChimpbaseProjectConfig {
     dir: string | null;
     envFile: string | null;
   };
+  kv: {
+    retention: { enabled: boolean; schedule: string };
+  };
   workflows: {
     contractsDir: string | null;
   };
@@ -96,6 +99,9 @@ export interface ChimpbaseProjectConfigInput {
     minLevel?: "debug" | "info" | "warn" | "error";
     persist?: { log?: boolean; metric?: boolean; trace?: boolean };
     retention?: { enabled?: boolean; maxAgeDays?: number; schedule?: string };
+  };
+  kv?: {
+    retention?: { enabled?: boolean; schedule?: string };
   };
   workflows?: {
     contractsDir?: string | null;
@@ -267,6 +273,12 @@ export function normalizeProjectConfig(
         enabled: input.telemetry?.retention?.enabled ?? false,
         maxAgeDays: input.telemetry?.retention?.maxAgeDays ?? 30,
         schedule: input.telemetry?.retention?.schedule ?? "0 2 * * *",
+      },
+    },
+    kv: {
+      retention: {
+        enabled: input.kv?.retention?.enabled ?? false,
+        schedule: input.kv?.retention?.schedule ?? "0 3 * * *",
       },
     },
     workflows: {

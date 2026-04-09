@@ -77,7 +77,8 @@ export async function ensurePostgresInternalTables(pool: Pool): Promise<void> {
       CREATE TABLE IF NOT EXISTS _chimpbase_kv (
         key TEXT PRIMARY KEY,
         value_json JSONB NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        expires_at TIMESTAMPTZ DEFAULT NULL
       )
     `,
   );
@@ -206,6 +207,13 @@ export async function ensurePostgresInternalTables(pool: Pool): Promise<void> {
     `
       CREATE INDEX IF NOT EXISTS idx_chimpbase_workflow_instances_status
       ON _chimpbase_workflow_instances(status, wake_at_ms)
+    `,
+  );
+
+  await pool.query(
+    `
+      ALTER TABLE _chimpbase_kv
+      ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT NULL
     `,
   );
 
@@ -513,7 +521,7 @@ export function createPostgresEngineAdapter(
     },
     async kvGet<TValue = unknown>(key: string): Promise<TValue | null> {
       const result = await queryable().query<{ value_json: string }>(
-        "SELECT value_json::text AS value_json FROM _chimpbase_kv WHERE key = $1 LIMIT 1",
+        "SELECT value_json::text AS value_json FROM _chimpbase_kv WHERE key = $1 AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1",
         [key],
       );
       const row = result.rows[0];
@@ -525,23 +533,25 @@ export function createPostgresEngineAdapter(
         `
           SELECT key
           FROM _chimpbase_kv
-          WHERE key LIKE $1
+          WHERE key LIKE $1 AND (expires_at IS NULL OR expires_at > NOW())
           ORDER BY key ASC
         `,
         [`${prefix}%`],
       );
       return result.rows.map((row) => row.key);
     },
-    async kvSet<TValue = unknown>(key: string, value: TValue) {
+    async kvSet<TValue = unknown>(key: string, value: TValue, ttlMs?: number) {
+      const expiresAt = ttlMs !== undefined ? new Date(Date.now() + ttlMs).toISOString() : null;
       await queryable().query(
         `
-          INSERT INTO _chimpbase_kv (key, value_json, updated_at)
-          VALUES ($1, $2::jsonb, NOW())
+          INSERT INTO _chimpbase_kv (key, value_json, updated_at, expires_at)
+          VALUES ($1, $2::jsonb, NOW(), $3::timestamptz)
           ON CONFLICT(key) DO UPDATE SET
             value_json = excluded.value_json,
-            updated_at = NOW()
+            updated_at = NOW(),
+            expires_at = excluded.expires_at
         `,
-        [key, JSON.stringify(value ?? null)],
+        [key, JSON.stringify(value ?? null), expiresAt],
       );
     },
     async listCronSchedules(): Promise<PersistedCronScheduleRow[]> {

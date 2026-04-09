@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/host",
-  "version": "0.1.28",
+  "version": "0.2.0",
   "description": "Shared host runtime and adapters for Chimpbase runtimes.",
   "license": "Apache-2.0",
   "type": "module",
@@ -37,10 +37,10 @@
     "prepack": "node ../../scripts/build-package.mjs host"
   },
   "dependencies": {
-    "@chimpbase/core": "0.1.28",
-    "@chimpbase/postgres": "0.1.28",
-    "@chimpbase/runtime": "0.1.28",
-    "@chimpbase/tooling": "0.1.28",
+    "@chimpbase/core": "0.2.0",
+    "@chimpbase/postgres": "0.2.0",
+    "@chimpbase/runtime": "0.2.0",
+    "@chimpbase/tooling": "0.2.0",
     "kysely": "^0.28.11"
   }
 }

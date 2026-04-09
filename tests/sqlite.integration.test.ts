@@ -19,6 +19,7 @@ import {
 import {
   createProjectFixture as createTodoTsFixture,
   startServer as startTodoTsServer,
+  TEST_AUTH_HEADERS,
 } from "../examples/bun/todo-ts/tests/support/runtime-harness.ts";
 import { installLocalPackage } from "./support/local_package.ts";
 
@@ -168,8 +169,8 @@ describe("sqlite integration", () => {
     );
 
     try {
-      const seedResponse = await fetch(`${server.url}/seed`, { method: "POST" });
-      const projectsResponse = await fetch(`${server.url}/projects`);
+      const seedResponse = await fetch(`${server.url}/seed`, { method: "POST", headers: TEST_AUTH_HEADERS });
+      const projectsResponse = await fetch(`${server.url}/projects`, { headers: TEST_AUTH_HEADERS });
       const projects = await projectsResponse.json() as Array<{ slug: string }>;
 
       expect(seedResponse.status).toBe(201);
