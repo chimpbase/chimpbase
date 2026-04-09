@@ -13,5 +13,6 @@
 **/*.sqlite-shm
 **/*.sqlite-wal
 **/*.sqlite3
+docs/.vitepress/cache/
 .DS_Store
 *.log

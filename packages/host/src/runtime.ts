@@ -1025,6 +1025,19 @@ function registerInternalCleanupCrons<TServer>(
     );
     host.setTelemetryOverride("cron:__chimpbase.subscription.idempotency.cleanup", false);
   }
+
+  if (config.kv.retention.enabled) {
+    host.registerCron(
+      "__chimpbase.kv.cleanup",
+      config.kv.retention.schedule,
+      async (ctx) => {
+        await ctx.db.query(
+          "DELETE FROM _chimpbase_kv WHERE expires_at IS NOT NULL AND expires_at <= CURRENT_TIMESTAMP",
+        );
+      },
+    );
+    host.setTelemetryOverride("cron:__chimpbase.kv.cleanup", false);
+  }
 }
 
 function normalizeActionExecutionArgs(args: unknown[] | unknown): unknown[] {

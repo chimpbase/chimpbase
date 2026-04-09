@@ -19,6 +19,9 @@
     "publish:dry-run": "bun run build:publish:packages && (cd packages/runtime && bun publish --dry-run --frozen-lockfile) && (cd packages/core && bun publish --dry-run --frozen-lockfile) && (cd packages/tooling && bun publish --dry-run --frozen-lockfile) && (cd packages/postgres && bun publish --dry-run --frozen-lockfile) && (cd packages/host && bun publish --dry-run --frozen-lockfile) && (cd packages/deno && bun publish --dry-run --frozen-lockfile) && (cd packages/node && bun publish --dry-run --frozen-lockfile) && (cd packages/rest-collections && bun publish --dry-run --frozen-lockfile) && (cd packages/bun && bun publish --dry-run --frozen-lockfile)",
     "release:check": "bun run ci:check",
     "release:publish": "bun run build:publish:packages && (cd packages/runtime && bun publish --frozen-lockfile) && (cd packages/core && bun publish --frozen-lockfile) && (cd packages/tooling && bun publish --frozen-lockfile) && (cd packages/postgres && bun publish --frozen-lockfile) && (cd packages/host && bun publish --frozen-lockfile) && (cd packages/deno && bun publish --frozen-lockfile) && (cd packages/node && bun publish --frozen-lockfile) && (cd packages/rest-collections && bun publish --frozen-lockfile) && (cd packages/bun && bun publish --frozen-lockfile)",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "test": "bun test",
     "typecheck": "./node_modules/.bin/tsc --noEmit"
   },
@@ -48,6 +51,7 @@
     "split2": "^4.2.0",
     "tslib": "^2.8.1",
     "typescript": "^5.9.3",
+    "vitepress": "^1.6.4",
     "xtend": "^4.0.2"
   }
 }

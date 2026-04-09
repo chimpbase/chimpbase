@@ -153,6 +153,7 @@ describe("@chimpbase/tooling", () => {
           pollIntervalMs: 250,
           retryDelayMs: 1000,
         },
+        kv: { retention: { enabled: false, schedule: "0 3 * * *" } },
         workflows: { contractsDir: "workflow-contracts" },
       },
       {

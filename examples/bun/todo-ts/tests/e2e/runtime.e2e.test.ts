@@ -7,6 +7,7 @@ import {
   createProjectFixture,
   runAction,
   startServer,
+  TEST_AUTH_HEADERS,
 } from "../support/runtime-harness.ts";
 
 const fixtures: Array<{ cleanup(): Promise<void> }> = [];
@@ -235,10 +236,11 @@ test("executes modular seed and query actions through the CLI", async () => {
 
       const seedResponse = await fetch(`${server.url}/seed`, {
         method: "POST",
+        headers: TEST_AUTH_HEADERS,
       });
       expect(seedResponse.status).toBe(201);
 
-      const projectsResponse = await fetch(`${server.url}/projects`);
+      const projectsResponse = await fetch(`${server.url}/projects`, { headers: TEST_AUTH_HEADERS });
       expect(projectsResponse.status).toBe(200);
 
       const projects = await projectsResponse.json() as Array<{ slug: string }>;
@@ -251,19 +253,20 @@ test("executes modular seed and query actions through the CLI", async () => {
   test("loads notifier sender from .env in the example bootstrap", async () => {
     const fixture = await createProjectFixture("server-env");
     fixtures.push(fixture);
-    await writeFile(`${fixture.projectDir}/.env`, "TODO_NOTIFIER_SENDER=alerts@example.test\n");
+    await writeFile(`${fixture.projectDir}/.env`, "TODO_NOTIFIER_SENDER=alerts@example.test\nCHIMPBASE_BOOTSTRAP_API_KEY=test-bootstrap-key\n");
 
     const server = await startServer(fixture.projectDir, fixture.port);
 
     try {
       const seedResponse = await fetch(`${server.url}/seed`, {
         method: "POST",
+        headers: TEST_AUTH_HEADERS,
       });
       expect(seedResponse.status).toBe(201);
 
       const createResponse = await fetch(`${server.url}/todos`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...TEST_AUTH_HEADERS },
         body: JSON.stringify({
           assigneeEmail: "sre@chimpbase.dev",
           description: "Validate .env secret bootstrap.",
@@ -278,17 +281,19 @@ test("executes modular seed and query actions through the CLI", async () => {
 
       const startResponse = await fetch(`${server.url}/todos/${createdTodo.id}/start`, {
         method: "POST",
+        headers: TEST_AUTH_HEADERS,
       });
       expect(startResponse.status).toBe(200);
 
       const completeResponse = await fetch(`${server.url}/todos/${createdTodo.id}/complete`, {
         method: "POST",
+        headers: TEST_AUTH_HEADERS,
       });
       expect(completeResponse.status).toBe(200);
 
       let notifications: Array<{ sender_email: string }> = [];
       for (let attempt = 0; attempt < 20; attempt += 1) {
-        const response = await fetch(`${server.url}/notifications`);
+        const response = await fetch(`${server.url}/notifications`, { headers: TEST_AUTH_HEADERS });
         expect(response.status).toBe(200);
         notifications = await response.json() as Array<{ sender_email: string }>;
         if (notifications.length > 0) {

@@ -8,6 +8,10 @@ const repoRoot = resolve(scriptDir, "..");
 const tscEntrypoint = resolve(repoRoot, "node_modules/typescript/bin/tsc");
 
 const packageConfigs = {
+  auth: {
+    dir: "packages/auth",
+    types: ["node"],
+  },
   bun: {
     dir: "packages/bun",
     types: ["bun-types", "node"],
@@ -42,6 +46,10 @@ const packageConfigs = {
   },
   tooling: {
     dir: "packages/tooling",
+    types: ["node"],
+  },
+  webhooks: {
+    dir: "packages/webhooks",
     types: ["node"],
   },
 };

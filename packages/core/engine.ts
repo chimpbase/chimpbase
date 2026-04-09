@@ -217,7 +217,7 @@ export interface ChimpbaseEngineAdapter {
   kvDelete(key: string): Promise<void>;
   kvGet<TValue = unknown>(key: string): Promise<TValue | null>;
   kvList(options?: ChimpbaseKvListOptions): Promise<string[]>;
-  kvSet<TValue = unknown>(key: string, value: TValue): Promise<void>;
+  kvSet<TValue = unknown>(key: string, value: TValue, ttlMs?: number): Promise<void>;
   listCronSchedules(): Promise<PersistedCronScheduleRow[]>;
   markQueueJobFailure(
     jobId: number,
@@ -796,7 +796,7 @@ export class ChimpbaseEngine {
         delete: async (key: string) => await this.adapter.kvDelete(key),
         get: async <TValue = unknown>(key: string): Promise<TValue | null> => await this.adapter.kvGet<TValue>(key),
         list: async (options?: ChimpbaseKvListOptions): Promise<string[]> => await this.adapter.kvList(options),
-        set: async <TValue = unknown>(key: string, value: TValue) => await this.adapter.kvSet(key, value),
+        set: async <TValue = unknown>(key: string, value: TValue, options?: { ttlMs?: number }) => await this.adapter.kvSet(key, value, options?.ttlMs),
       },
       collection: {
         delete: async (name: string, filter: ChimpbaseCollectionFilter = {}): Promise<number> =>
