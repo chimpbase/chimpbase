@@ -471,7 +471,7 @@ describe("chimpbase-bun runtime", () => {
       debugCalls.push(args);
     };
 
-    const started = host.start({ runWorker: false, serve: false });
+    const started = await host.start({ runWorker: false, serve: false });
 
     try {
       await host.executeAction("health");
@@ -527,7 +527,7 @@ describe("chimpbase-bun runtime", () => {
       workerErrors.push(args);
     };
 
-    const started = host.start({ serve: false });
+    const started = await host.start({ serve: false });
 
     try {
       await expect(health()).resolves.toEqual({ ok: true });

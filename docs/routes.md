@@ -43,16 +43,68 @@ export default {
 
 ## Route Environment
 
-Both Hono handlers (`c.env`) and route handlers receive a `ChimpbaseRouteEnv` with one method:
+Both Hono handlers (`c.env`) and route handlers receive a `ChimpbaseRouteEnv`:
 
 ```ts
 interface ChimpbaseRouteEnv {
   action(name: string, ...args: unknown[]): Promise<unknown>;
   action(reference: ActionRegistration, ...args): Promise<Result>;
+  get<T = unknown>(key: string): T | undefined;
+  set(key: string, value: unknown): void;
 }
 ```
 
 Routes invoke business logic via actions — they don't have direct access to `db`, `kv`, `collection`, etc. This keeps HTTP handling separate from business logic.
+
+### Request Context
+
+`get` and `set` allow routes and middleware to pass data to downstream handlers within the same request. Context is per-request — each `executeRoute()` call gets a fresh map.
+
+```ts
+// Middleware sets context
+middleware("requestId", async (request, env) => {
+  env.set("requestId", crypto.randomUUID());
+  return null; // pass through
+});
+
+// Downstream route reads it
+app.get("/orders", async (c) => {
+  const requestId = c.env.get<string>("requestId");
+  const userId = c.env.get<string>("auth.userId"); // set by auth plugin
+  // ...
+});
+```
+
+The auth plugin automatically sets these context values after successful authentication:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `auth.userId` | `string \| null` | Authenticated user ID (`null` for bootstrap key) |
+| `auth.scopes` | `string[]` | Scopes on the API key |
+| `auth.bootstrap` | `boolean` | Whether the bootstrap key was used |
+
+## Middleware
+
+The `middleware()` function is an alias for `route()` that signals intent — a handler that sets context or short-circuits, then returns `null` to pass through:
+
+```ts
+import { middleware } from "@chimpbase/runtime";
+
+const cors = middleware("cors", async (request, env) => {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, POST, PATCH, DELETE",
+        "access-control-allow-headers": "content-type, x-api-key, authorization",
+      },
+    });
+  }
+  return null;
+});
+```
+
+Middleware runs in registration order before your routes and Hono handler.
 
 ## Using `route()` (for plugins)
 

@@ -337,7 +337,7 @@ export async function runQueueBurstBenchmark(options: LoadTestOptions): Promise<
       runId,
     });
 
-    const started = host.start({ runWorker: true, serve: false });
+    const started = await host.start({ runWorker: true, serve: false });
     const startedAtMs = performance.now();
 
     try {
@@ -374,7 +374,7 @@ export async function runQueueSteadyBenchmark(options: LoadTestOptions): Promise
     }
 
     const runId = `queue-steady:${crypto.randomUUID()}`;
-    const started = host.start({ runWorker: true, serve: false });
+    const started = await host.start({ runWorker: true, serve: false });
     const targetIntervalMs = 1_000 / options.steadyRatePerSecond;
     let produced = 0;
     let nextDueAtMs = performance.now();
@@ -438,7 +438,7 @@ async function drainQueueRun(
   runId: string,
   expectedCount: number,
 ): Promise<void> {
-  const started = host.start({ runWorker: true, serve: false });
+  const started = await host.start({ runWorker: true, serve: false });
 
   try {
     await waitForQueueLatencies(host, runId, expectedCount);

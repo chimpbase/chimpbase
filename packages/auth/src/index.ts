@@ -353,6 +353,8 @@ export function chimpbaseAuth(
 
       const result = await env.action("__chimpbase.auth.validateApiKey", rawKey) as {
         valid: boolean;
+        userId?: string | null;
+        bootstrap?: boolean;
         scopes?: string[];
       };
 
@@ -389,6 +391,11 @@ export function chimpbaseAuth(
       if (!hasRequiredScope(keyScopes, requiredScopes)) {
         return jsonError(403, "insufficient permissions");
       }
+
+      // Set request context for downstream routes
+      env.set("auth.userId", result.userId ?? null);
+      env.set("auth.scopes", keyScopes);
+      env.set("auth.bootstrap", result.bootstrap ?? false);
 
       return null;
     }),

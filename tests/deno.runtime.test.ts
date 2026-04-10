@@ -428,7 +428,7 @@ if (!dockerAvailable) {
         async (ctx) => await ctx.db.query("SELECT value FROM cross_process_audit ORDER BY id ASC"),
       );
 
-      const startedSubscriber = subscriber.start({ runWorker: false, serve: false });
+      const startedSubscriber = await subscriber.start({ runWorker: false, serve: false });
 
       try {
         await sleep(100);
@@ -674,7 +674,7 @@ if (!dockerAvailable) {
         expect(routeOutcome.response?.status).toBe(200);
         expect(await routeOutcome.response?.json()).toEqual([{ value: "from-load" }]);
 
-        const started = host.start({ runWorker: false, serve: true });
+        const started = await host.start({ runWorker: false, serve: true });
         expect(started.server?.port).toBe(4821);
         const routeHandler: (request: Request) => Response | Promise<Response> = servedHandler ?? (() => {
           throw new Error("expected Deno.serve handler to be registered");

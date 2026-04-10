@@ -721,4 +721,70 @@ describe("@chimpbase/auth", () => {
       host.close();
     }
   });
+
+  // ── Request context ───────────────────────────────────────────────────
+
+  test("auth guard sets request context for downstream routes", async () => {
+    const host = await createAuthHost();
+    try {
+      const userResult = await host.executeAction("__chimpbase.auth.createUser", [{
+        email: "ctx@test.com", name: "Ctx",
+      }]);
+      const user = userResult.result as { id: string };
+
+      const keyResult = await host.executeAction("__chimpbase.auth.createApiKey", [{
+        userId: user.id, scopes: ["read", "write"],
+      }]);
+      const keyData = keyResult.result as { key: string };
+
+      // Register a route that reads auth context
+      let capturedUserId: string | undefined;
+      let capturedScopes: string[] | undefined;
+      let capturedBootstrap: boolean | undefined;
+
+      const { route } = await import("../packages/runtime/index.ts");
+      host.register({
+        contextReader: route("test.contextReader", async (_request, env) => {
+          capturedUserId = env.get<string>("auth.userId");
+          capturedScopes = env.get<string[]>("auth.scopes");
+          capturedBootstrap = env.get<boolean>("auth.bootstrap");
+          return Response.json({ userId: capturedUserId });
+        }),
+      });
+
+      const outcome = await host.executeRoute(
+        new Request("http://test.local/context-test", { headers: authHeaders(keyData.key) }),
+      );
+
+      expect(outcome.response?.status).toBe(200);
+      expect(capturedUserId).toBe(user.id);
+      expect(capturedScopes).toEqual(["read", "write"]);
+      expect(capturedBootstrap).toBe(false);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("bootstrap key sets auth.bootstrap to true", async () => {
+    const host = await createAuthHost();
+    try {
+      let capturedBootstrap: boolean | undefined;
+
+      const { route } = await import("../packages/runtime/index.ts");
+      host.register({
+        reader: route("test.bootstrapReader", async (_request, env) => {
+          capturedBootstrap = env.get<boolean>("auth.bootstrap");
+          return Response.json({ bootstrap: capturedBootstrap });
+        }),
+      });
+
+      await host.executeRoute(
+        new Request("http://test.local/bootstrap-test", { headers: authHeaders() }),
+      );
+
+      expect(capturedBootstrap).toBe(true);
+    } finally {
+      host.close();
+    }
+  });
 });

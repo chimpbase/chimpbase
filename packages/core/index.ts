@@ -186,6 +186,8 @@ export interface ChimpbaseRegistry {
   actions: Map<string, ChimpbaseActionRegistration<any, any, any>>;
   crons: Map<string, ChimpbaseCronRegistration>;
   httpHandler: ChimpbaseRouteHandler | null;
+  onStartHooks: Array<{ handler: (ctx: any) => Promise<void> | void; name: string }>;
+  onStopHooks: Array<{ handler: () => Promise<void> | void; name: string }>;
   routes: ChimpbaseRouteRegistration[];
   subscriptions: Map<string, ChimpbaseSubscriptionEntry[]>;
   telemetryOverrides: Map<string, ChimpbaseTelemetryPersistOverride>;
@@ -320,6 +322,8 @@ export function createChimpbaseRegistry(): ChimpbaseRegistry {
     actions: new Map(),
     crons: new Map(),
     httpHandler: null,
+    onStartHooks: [],
+    onStopHooks: [],
     routes: [],
     subscriptions: new Map(),
     telemetryOverrides: new Map(),

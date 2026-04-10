@@ -41,7 +41,7 @@ const scopes = keyData.scopes as string[] | undefined;
 if (!scopes || scopes[0] !== "read") throw new Error(`scopes should be [read,write], got: ${JSON.stringify(scopes)}`);
 
 // Auth with generated key
-const r6 = await chimpbase.executeRoute(new Request("http://test.local/some-path", { headers: { "x-api-key": keyData.key } }));
+const r6 = await chimpbase.executeRoute(new Request("http://test.local/some-path", { headers: { "x-api-key": keyData.key as string } }));
 if (r6.response !== null) throw new Error("should pass with generated key");
 
 // Scope enforcement: read key cannot POST

@@ -348,12 +348,12 @@ async function loadProjectAppDefinitionOrThrow(projectDir: string): Promise<Chim
   return app;
 }
 
-function startLoadedHost<TServer, THost extends ChimpbaseHost<TServer>>(
+async function startLoadedHost<TServer, THost extends ChimpbaseHost<TServer>>(
   host: THost,
   serveOption?: boolean,
   runWorkerOption?: boolean,
-): StartedChimpbaseProject<THost, TServer> {
-  const started = host.start({
+): Promise<StartedChimpbaseProject<THost, TServer>> {
+  const started = await host.start({
     runWorker: runWorkerOption,
     serve: serveOption,
   }) as StartedHost<THost, TServer>;

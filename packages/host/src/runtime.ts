@@ -459,6 +459,20 @@ export class ChimpbaseHost<TServer> {
     return handler;
   }
 
+  registerOnStart(
+    name: string,
+    handler: (ctx: any) => Promise<void> | void,
+  ): void {
+    this.registry.onStartHooks.push({ handler, name });
+  }
+
+  registerOnStop(
+    name: string,
+    handler: () => Promise<void> | void,
+  ): void {
+    this.registry.onStopHooks.push({ handler, name });
+  }
+
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState> {
@@ -531,7 +545,7 @@ export class ChimpbaseHost<TServer> {
     );
   }
 
-  start(options: { runWorker?: boolean; serve?: boolean } = {}): StartedHost<this, TServer> {
+  async start(options: { runWorker?: boolean; serve?: boolean } = {}): Promise<StartedHost<this, TServer>> {
     const runServe = options.serve ?? !options.runWorker;
     const runWorker = options.runWorker ?? !options.serve;
     const worker = runWorker ? this.startWorker() : null;
@@ -545,10 +559,21 @@ export class ChimpbaseHost<TServer> {
     });
     this.engine.startEventBus();
 
+    for (const hook of this.registry.onStartHooks) {
+      await this.engine.executeLifecycleHook(hook.handler);
+    }
+
     return {
       host: this,
       server,
       stop: async () => {
+        for (const hook of this.registry.onStopHooks) {
+          try {
+            await hook.handler();
+          } catch (err) {
+            console.error(`onStop hook "${hook.name}" failed:`, err);
+          }
+        }
         if (server) {
           await this.runtime.server.stop(server);
         }
@@ -959,6 +984,8 @@ function cloneRegistryForWorkerEngine(source: ChimpbaseRegistry): ChimpbaseRegis
     actions: new Map(source.actions),
     crons: new Map(source.crons),
     httpHandler: source.httpHandler,
+    onStartHooks: [],
+    onStopHooks: [],
     routes: [...source.routes],
     subscriptions: new Map(
       [...source.subscriptions.entries()].map(([eventName, entries]) => [eventName, [...entries]]),

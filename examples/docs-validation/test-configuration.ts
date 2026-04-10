@@ -25,7 +25,7 @@ chimpbase.register({ testConfig }); await chimpbase.start();
 const r = await chimpbase.executeAction("testConfig", {}); console.log("configuration:", JSON.stringify(r.result));
 
 // Test start options
-const started = chimpbase.start({ serve: false, runWorker: false });
+const started = await chimpbase.start({ serve: false, runWorker: false });
 await started.stop();
 
 console.log("configuration: OK"); chimpbase.close(); process.exit(0);

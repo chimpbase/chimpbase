@@ -5,7 +5,7 @@ Plugins are composable groups of registrations (actions, routes, subscriptions, 
 ## Creating a Plugin
 
 ```ts
-import { action, plugin, route, subscription, worker } from "@chimpbase/runtime";
+import { action, onStart, onStop, plugin, route, subscription, worker } from "@chimpbase/runtime";
 
 export function myPlugin(options: MyPluginOptions) {
   const entries = [];
@@ -40,6 +40,42 @@ export default {
   ],
 };
 ```
+
+## Lifecycle Hooks
+
+Plugins can run code on startup and shutdown:
+
+```ts
+import { onStart, onStop, plugin, action } from "@chimpbase/runtime";
+
+function myPlugin() {
+  return plugin(
+    { name: "my-plugin" },
+    onStart("my-plugin.init", async (ctx) => {
+      ctx.log.info("plugin starting");
+      await ctx.kv.set("my-plugin.version", "1.0");
+    }),
+    onStop("my-plugin.cleanup", async () => {
+      console.log("plugin shutting down");
+    }),
+    action("myAction", async (ctx) => { /* ... */ }),
+  );
+}
+```
+
+### `onStart(name, handler)`
+
+Runs after the engine is initialized, before serving requests. The handler receives a full `ChimpbaseContext` with access to `db`, `kv`, `collection`, etc.
+
+Use cases: seed data, validate config, warm caches, run health checks.
+
+### `onStop(name, handler)`
+
+Runs during graceful shutdown, before the server and worker stop.
+
+Use cases: flush buffers, close connections, log final metrics.
+
+Hooks run in registration order. If an `onStop` hook throws, the error is logged but shutdown continues.
 
 ## Plugin Dependencies
 

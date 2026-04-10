@@ -185,7 +185,7 @@ if (!dockerAvailable) {
         completed.push(value);
       });
 
-      const runtime = host.start({ runWorker: true, serve: false });
+      const runtime = await host.start({ runWorker: true, serve: false });
 
       try {
         await host.executeAction("enqueueSlowJobs");
@@ -276,8 +276,8 @@ if (!dockerAvailable) {
         );
       });
 
-      const startedSubscriber = subscriber.start({ runWorker: true, serve: false });
-      const startedWorker = workerHost.start({ runWorker: true, serve: false });
+      const startedSubscriber = await subscriber.start({ runWorker: true, serve: false });
+      const startedWorker = await workerHost.start({ runWorker: true, serve: false });
 
       try {
         await Bun.sleep(100);
@@ -402,7 +402,7 @@ if (!dockerAvailable) {
           ),
       );
 
-      const startedSubscriber = subscriber.start({ runWorker: false, serve: false });
+      const startedSubscriber = await subscriber.start({ runWorker: false, serve: false });
 
       try {
         await Bun.sleep(100);
@@ -495,7 +495,7 @@ if (!dockerAvailable) {
         return null;
       });
 
-      const startedSubscriber = subscriber.start({ runWorker: false, serve: false });
+      const startedSubscriber = await subscriber.start({ runWorker: false, serve: false });
 
       try {
         await Bun.sleep(100);

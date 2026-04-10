@@ -50,7 +50,10 @@ test("executes modular seed and query actions through the CLI", async () => {
       completed_at: "2026-03-08 01:35:00",
     };
 
+    const _ctx = new Map<string, unknown>();
     const env: ChimpbaseRouteEnv = {
+      get<T = unknown>(key: string): T | undefined { return _ctx.get(key) as T | undefined; },
+      set(key: string, value: unknown): void { _ctx.set(key, value); },
       async action<TArgs extends unknown[] = unknown[], TResult = unknown>(
         nameOrReference: string | { name: string },
         ...args: TArgs

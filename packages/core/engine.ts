@@ -728,12 +728,28 @@ export class ChimpbaseEngine {
   }
 
   createRouteEnv(): ChimpbaseRouteEnv {
+    const contextMap = new Map<string, unknown>();
     return {
       action: async <TArgs extends unknown[] = unknown[], TResult = unknown>(
         nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
         ...args: TArgs
       ): Promise<TResult> => await this.invokeAction<TResult>(nameOrReference, args),
+      get<T = unknown>(key: string): T | undefined {
+        return contextMap.get(key) as T | undefined;
+      },
+      set(key: string, value: unknown): void {
+        contextMap.set(key, value);
+      },
     };
+  }
+
+  async executeLifecycleHook(
+    handler: (ctx: ChimpbaseContext) => Promise<void> | void,
+  ): Promise<void> {
+    await this.runWithActionInvoker(async () => {
+      const ctx = this.createContext({ kind: "action", name: "__lifecycle" });
+      await handler(ctx);
+    });
   }
 
   private async processCronQueuePayload(payload: CronQueuePayload): Promise<void> {

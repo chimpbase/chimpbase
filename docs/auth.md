@@ -97,6 +97,23 @@ The plugin registers a **guard route** that runs before all other routes. On eac
 
 API keys are stored as SHA-256 hashes. The plaintext key is only returned once at creation time.
 
+After successful authentication, the guard sets request context that downstream routes can read:
+
+```ts
+app.get("/profile", async (c) => {
+  const userId = c.env.get<string>("auth.userId");
+  const scopes = c.env.get<string[]>("auth.scopes");
+  const isBootstrap = c.env.get<boolean>("auth.bootstrap");
+  // ...
+});
+```
+
+| Context Key | Type | Description |
+|-------------|------|-------------|
+| `auth.userId` | `string \| null` | User ID of the key owner (`null` for bootstrap) |
+| `auth.scopes` | `string[]` | Scopes on the authenticated key |
+| `auth.bootstrap` | `boolean` | `true` if the bootstrap key was used |
+
 ## Scopes
 
 API keys have scopes that control what they can access:
