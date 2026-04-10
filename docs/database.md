@@ -111,11 +111,16 @@ Migrations run automatically on startup.
 
 ## Storage Configuration
 
-```toml
-[storage]
-engine = "postgres"                # "postgres" | "sqlite" | "memory"
-url = "postgresql://localhost/mydb" # for postgres
-path = "./data/app.db"             # for sqlite
+Configure storage in your app definition:
+
+```ts
+const chimpbase = await createChimpbase({
+  storage: {
+    engine: "postgres",                       // "postgres" | "sqlite" | "memory"
+    url: "postgresql://localhost/mydb",        // for postgres
+    // path: "./data/app.db",                 // for sqlite
+  },
+});
 ```
 
 Or via environment variables:

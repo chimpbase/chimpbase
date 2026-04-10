@@ -54,25 +54,19 @@ Traces can be nested — inner traces appear as child spans.
 
 ## Telemetry Persistence
 
-By default, telemetry is logged to stdout. Enable persistence to store telemetry in streams:
+By default, telemetry is logged to stdout. Enable persistence to store telemetry in streams via the app definition:
 
-```toml
-[telemetry]
-min_level = "info"    # "debug" | "info" | "warn" | "error"
-
-[telemetry.persist]
-log = true            # persist logs to stream
-metric = true         # persist metrics to stream
-trace = true          # persist traces to stream
-```
-
-### Retention
-
-```toml
-[telemetry.retention]
-enabled = true
-max_age_days = 30
-schedule = "0 4 * * *"  # cleanup at 4 AM daily
+```ts
+export default {
+  telemetry: {
+    minLevel: "info",  // "debug" | "info" | "warn" | "error"
+    persist: {
+      log: true,       // persist logs to stream
+      metric: true,    // persist metrics to stream
+      trace: true,     // persist traces to stream
+    },
+  },
+} satisfies ChimpbaseAppDefinitionInput;
 ```
 
 ## Per-Handler Control

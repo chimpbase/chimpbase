@@ -151,9 +151,12 @@ In run-based workflows, the `wf` context provides:
 
 ## Configuration
 
-```toml
-[workflows]
-contracts_dir = "./workflow-contracts"  # optional, for contract sync
+```ts
+export default {
+  workflows: {
+    contractsDir: "./workflow-contracts", // optional, for contract sync
+  },
+} satisfies ChimpbaseAppDefinitionInput;
 ```
 
 ## Registration
