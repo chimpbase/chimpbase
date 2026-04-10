@@ -69,6 +69,16 @@ chimpbaseAuth({
 
   // Base path for management API. Set to null to disable. Default: "/_auth"
   managementBasePath: "/_auth",
+
+  // Rate limiting for brute-force protection. Disabled if omitted.
+  rateLimit: {
+    maxAttempts: 5,        // failures before block
+    windowMs: 60_000,      // 1 minute window
+    blockDurationMs: 300_000, // 5 minute block
+  },
+
+  // Path prefixes requiring webhooks:manage scope. Default: ["/_webhooks"]
+  webhooksManagementPaths: ["/_webhooks"],
 })
 ```
 
@@ -86,6 +96,59 @@ The plugin registers a **guard route** that runs before all other routes. On eac
 8. Passes through to the actual route handler
 
 API keys are stored as SHA-256 hashes. The plaintext key is only returned once at creation time.
+
+## Scopes
+
+API keys have scopes that control what they can access:
+
+| Scope | Access |
+|-------|--------|
+| `admin` | Full access to everything |
+| `read` | GET/HEAD/OPTIONS on app routes |
+| `write` | All methods on app routes (includes read) |
+| `auth:manage` | Access to `/_auth/*` management routes |
+| `webhooks:manage` | Access to `/_webhooks/*` management routes |
+
+Scopes are specified when creating an API key:
+
+```bash
+curl -X POST http://localhost:3000/_auth/users/<user-id>/keys \
+  -H "X-API-Key: <admin-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "read-only", "scopes": ["read"]}'
+```
+
+If `scopes` is omitted, the key defaults to `["read", "write"]`. The bootstrap key implicitly has `admin` scope.
+
+A request is allowed if the key has **any** of the required scopes for that route. For example, `/_auth/users` requires either `admin` or `auth:manage`.
+
+Insufficient permissions return `403`:
+
+```json
+{ "error": "insufficient permissions" }
+```
+
+## Rate Limiting
+
+Enable rate limiting to protect against brute-force attacks:
+
+```ts
+chimpbaseAuth({
+  rateLimit: {
+    maxAttempts: 5,           // max failures before block
+    windowMs: 60_000,         // 1 minute sliding window
+    blockDurationMs: 300_000, // 5 minute cooldown
+  },
+})
+```
+
+When rate limiting is enabled:
+- Failed auth attempts are tracked per API key prefix (first 8 characters)
+- After `maxAttempts` failures within `windowMs`, the key prefix is blocked for `blockDurationMs`
+- Blocked requests return `429 Too Many Requests` with a `Retry-After` header
+- A successful authentication resets the failure counter
+
+Rate limiting is disabled by default. Counters use the KV store with TTL — no cleanup needed.
 
 ## Management API
 
@@ -138,11 +201,12 @@ POST /_auth/users/:userId/keys
 ```json
 {
   "label": "production",
-  "expiresAt": "2025-12-31T23:59:59Z"
+  "expiresAt": "2025-12-31T23:59:59Z",
+  "scopes": ["read", "write"]
 }
 ```
 
-Both fields are optional. Returns the created key **including the plaintext key** with `201`. This is the only time the full key is returned — store it securely.
+All fields are optional. `scopes` defaults to `["read", "write"]`. Returns the created key **including the plaintext key** with `201`. This is the only time the full key is returned — store it securely.
 
 Response:
 

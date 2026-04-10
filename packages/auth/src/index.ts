@@ -9,6 +9,23 @@ import {
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+export type AuthScope = "admin" | "read" | "write" | "auth:manage" | "webhooks:manage";
+
+const VALID_SCOPES: ReadonlySet<string> = new Set<AuthScope>([
+  "admin", "read", "write", "auth:manage", "webhooks:manage",
+]);
+
+const DEFAULT_SCOPES: AuthScope[] = ["read", "write"];
+
+export interface ChimpbaseAuthRateLimitOptions {
+  /** Maximum failed attempts before blocking. Default: `5`. */
+  maxAttempts?: number;
+  /** Time window in milliseconds for counting failures. Default: `60000` (1 minute). */
+  windowMs?: number;
+  /** Duration in milliseconds to block after exceeding max attempts. Default: `300000` (5 minutes). */
+  blockDurationMs?: number;
+}
+
 export interface ChimpbaseAuthOptions {
   /** Which path prefixes require authentication. Default: `"all"`. */
   protectedPaths?: string[] | "all";
@@ -18,6 +35,10 @@ export interface ChimpbaseAuthOptions {
   bootstrapKeySecret?: string;
   /** Base path for the management REST API. Set to `null` to disable. Default: `"/_auth"`. */
   managementBasePath?: string | null;
+  /** Rate limiting for failed authentication attempts. Disabled if not provided. */
+  rateLimit?: ChimpbaseAuthRateLimitOptions;
+  /** Path prefixes that require the `webhooks:manage` scope. Default: `["/_webhooks"]`. */
+  webhooksManagementPaths?: string[];
   /** Plugin name. */
   name?: string;
   /** Plugin dependencies. */
@@ -39,6 +60,7 @@ export interface AuthApiKey {
   keyHash: string;
   keyPrefix: string;
   label: string;
+  scopes: string;
   createdAt: string;
   revokedAt: string | null;
   expiresAt: string | null;
@@ -118,12 +140,65 @@ function isProtectedPath(pathname: string, protectedPaths: string[] | "all"): bo
   });
 }
 
+function pathStartsWith(pathname: string, prefixes: string[]): boolean {
+  const normalized = normalizePath(pathname);
+  return prefixes.some((prefix) => {
+    const normalizedPrefix = normalizePath(prefix);
+    return normalized === normalizedPrefix || normalized.startsWith(normalizedPrefix + "/");
+  });
+}
+
+function resolveRequiredScopes(
+  method: string,
+  pathname: string,
+  managementBasePath: string | null,
+  webhooksManagementPaths: string[],
+): AuthScope[] {
+  if (managementBasePath && pathStartsWith(pathname, [managementBasePath])) {
+    return ["admin", "auth:manage"];
+  }
+
+  if (pathStartsWith(pathname, webhooksManagementPaths)) {
+    return ["admin", "webhooks:manage"];
+  }
+
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    return ["admin", "read", "write"];
+  }
+
+  return ["admin", "write"];
+}
+
+function hasRequiredScope(keyScopes: string[], requiredScopes: AuthScope[]): boolean {
+  return requiredScopes.some((scope) => keyScopes.includes(scope));
+}
+
+function parseScopes(raw: string | undefined | null): string[] {
+  if (!raw) {
+    return DEFAULT_SCOPES;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : DEFAULT_SCOPES;
+  } catch {
+    return DEFAULT_SCOPES;
+  }
+}
+
+function validateScopes(scopes: string[]): void {
+  for (const scope of scopes) {
+    if (!VALID_SCOPES.has(scope)) {
+      throw new AuthRequestError(400, `invalid scope: "${scope}". Valid scopes: ${[...VALID_SCOPES].join(", ")}`);
+    }
+  }
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function jsonError(status: number, error: string): Response {
-  return Response.json({ error }, { status });
+function jsonError(status: number, error: string, headers?: Record<string, string>): Response {
+  return Response.json({ error }, { status, headers });
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown>> {
@@ -160,6 +235,11 @@ export function chimpbaseAuth(
   const excludePaths = (options.excludePaths ?? ["/health"]).map(normalizePath);
   const bootstrapKeySecret = options.bootstrapKeySecret ?? null;
   const managementBasePath = options.managementBasePath === undefined ? "/_auth" : options.managementBasePath;
+  const webhooksManagementPaths = (options.webhooksManagementPaths ?? ["/_webhooks"]).map(normalizePath);
+  const rateLimitConfig = options.rateLimit ?? null;
+  const rlMaxAttempts = rateLimitConfig?.maxAttempts ?? 5;
+  const rlWindowMs = rateLimitConfig?.windowMs ?? 60_000;
+  const rlBlockDurationMs = rateLimitConfig?.blockDurationMs ?? 300_000;
 
   const entries: ChimpbaseRegistrationSource[] = [];
 
@@ -171,7 +251,7 @@ export function chimpbaseAuth(
       if (bootstrapKeySecret) {
         const bootstrapKey = ctx.secret(bootstrapKeySecret);
         if (bootstrapKey && rawKey === bootstrapKey) {
-          return { valid: true, userId: null, bootstrap: true };
+          return { valid: true, userId: null, bootstrap: true, scopes: ["admin"] };
         }
       }
 
@@ -189,9 +269,53 @@ export function chimpbaseAuth(
         return { valid: false, reason: "expired" };
       }
 
-      return { valid: true, userId: record.userId, bootstrap: false };
+      return {
+        valid: true,
+        userId: record.userId,
+        bootstrap: false,
+        scopes: parseScopes(record.scopes),
+      };
     }),
   );
+
+  // ── Rate limit action ─────────────────────────────────────────────────────
+
+  if (rateLimitConfig) {
+    entries.push(
+      action("__chimpbase.auth.rateLimit", async (ctx, input: { keyPrefix: string; outcome: "check" | "fail" | "success" }) => {
+        const blockKey = `__chimpbase.auth.ratelimit:block:${input.keyPrefix}`;
+        const countKey = `__chimpbase.auth.ratelimit:count:${input.keyPrefix}`;
+
+        if (input.outcome === "check") {
+          const blocked = await ctx.kv.get<boolean>(blockKey);
+          return { blocked: !!blocked };
+        }
+
+        if (input.outcome === "success") {
+          await ctx.kv.delete(countKey);
+          return { blocked: false };
+        }
+
+        // outcome === "fail"
+        const blocked = await ctx.kv.get<boolean>(blockKey);
+        if (blocked) {
+          return { blocked: true };
+        }
+
+        const existing = await ctx.kv.get<{ count: number }>(countKey);
+        const count = (existing?.count ?? 0) + 1;
+
+        if (count >= rlMaxAttempts) {
+          await ctx.kv.set(blockKey, true, { ttlMs: rlBlockDurationMs });
+          await ctx.kv.delete(countKey);
+          return { blocked: true };
+        }
+
+        await ctx.kv.set(countKey, { count }, { ttlMs: rlWindowMs });
+        return { blocked: false };
+      }),
+    );
+  }
 
   // ── Guard route ───────────────────────────────────────────────────────────
 
@@ -212,12 +336,58 @@ export function chimpbaseAuth(
         return jsonError(401, "missing API key");
       }
 
+      const keyPrefix = rawKey.substring(0, 8);
+
+      // Rate limit: check if blocked
+      if (rateLimitConfig) {
+        const rlCheck = await env.action("__chimpbase.auth.rateLimit", {
+          keyPrefix,
+          outcome: "check",
+        }) as { blocked: boolean };
+        if (rlCheck.blocked) {
+          return jsonError(429, "too many failed authentication attempts", {
+            "retry-after": String(Math.ceil(rlBlockDurationMs / 1000)),
+          });
+        }
+      }
+
       const result = await env.action("__chimpbase.auth.validateApiKey", rawKey) as {
         valid: boolean;
+        scopes?: string[];
       };
 
       if (!result.valid) {
+        // Rate limit: record failure
+        if (rateLimitConfig) {
+          const rlFail = await env.action("__chimpbase.auth.rateLimit", {
+            keyPrefix,
+            outcome: "fail",
+          }) as { blocked: boolean };
+          if (rlFail.blocked) {
+            return jsonError(429, "too many failed authentication attempts", {
+              "retry-after": String(Math.ceil(rlBlockDurationMs / 1000)),
+            });
+          }
+        }
         return jsonError(401, "invalid API key");
+      }
+
+      // Rate limit: clear counter on success
+      if (rateLimitConfig) {
+        await env.action("__chimpbase.auth.rateLimit", { keyPrefix, outcome: "success" });
+      }
+
+      // Scope check
+      const keyScopes = result.scopes ?? DEFAULT_SCOPES;
+      const requiredScopes = resolveRequiredScopes(
+        request.method,
+        url.pathname,
+        managementBasePath,
+        webhooksManagementPaths,
+      );
+
+      if (!hasRequiredScope(keyScopes, requiredScopes)) {
+        return jsonError(403, "insufficient permissions");
       }
 
       return null;
@@ -270,12 +440,15 @@ export function chimpbaseAuth(
   // ── API key management actions ────────────────────────────────────────────
 
   entries.push(
-    action("__chimpbase.auth.createApiKey", async (ctx, input: { userId: string; label?: string; expiresAt?: string }) => {
+    action("__chimpbase.auth.createApiKey", async (ctx, input: { userId: string; label?: string; expiresAt?: string; scopes?: string[] }) => {
       // Verify user exists
       const user = await ctx.collection.findOne<AuthUser>(USERS_COLLECTION, { id: input.userId });
       if (!user) {
         throw new AuthRequestError(404, "user not found");
       }
+
+      const scopes = input.scopes ?? DEFAULT_SCOPES;
+      validateScopes(scopes);
 
       const rawKey = generateRawKey();
       const keyHash = await hashKey(rawKey);
@@ -287,6 +460,7 @@ export function chimpbaseAuth(
         keyHash,
         keyPrefix,
         label: input.label ?? "",
+        scopes: JSON.stringify(scopes),
         createdAt: now,
         revokedAt: null,
         expiresAt: input.expiresAt ?? null,
@@ -298,6 +472,7 @@ export function chimpbaseAuth(
         key: rawKey,
         keyPrefix,
         label: input.label ?? "",
+        scopes,
         createdAt: now,
         expiresAt: input.expiresAt ?? null,
       };
@@ -312,6 +487,7 @@ export function chimpbaseAuth(
         userId: key.userId,
         keyPrefix: key.keyPrefix,
         label: key.label,
+        scopes: parseScopes(key.scopes),
         createdAt: key.createdAt,
         revokedAt: key.revokedAt,
         expiresAt: key.expiresAt,
@@ -385,6 +561,7 @@ export function chimpbaseAuth(
               userId,
               label: optionalString(body, "label"),
               expiresAt: optionalString(body, "expiresAt"),
+              scopes: optionalStringArray(body, "scopes"),
             });
             return Response.json(result, { status: 201 });
           }
@@ -480,4 +657,15 @@ function optionalString(body: Record<string, unknown>, field: string): string | 
     throw new AuthRequestError(400, `"${field}" must be a string`);
   }
   return value;
+}
+
+function optionalStringArray(body: Record<string, unknown>, field: string): string[] | undefined {
+  const value = body[field];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
+    throw new AuthRequestError(400, `"${field}" must be an array of strings`);
+  }
+  return value as string[];
 }

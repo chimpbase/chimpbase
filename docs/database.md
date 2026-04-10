@@ -1,0 +1,126 @@
+# Database
+
+Every handler has access to the database via `ctx.db`. Chimpbase supports PostgreSQL, SQLite, and in-memory storage.
+
+## Raw SQL
+
+```ts
+const users = await ctx.db.query<{ id: number; email: string }>(
+  "SELECT id, email FROM users WHERE status = ?1",
+  ["active"],
+);
+```
+
+### Parameterized queries
+
+Use positional parameters (`?1`, `?2`, etc. for SQLite; `$1`, `$2` for PostgreSQL):
+
+```ts
+// SQLite
+await ctx.db.query(
+  "INSERT INTO orders (customer_id, total) VALUES (?1, ?2) RETURNING *",
+  [customerId, total],
+);
+
+// PostgreSQL
+await ctx.db.query(
+  "INSERT INTO orders (customer_id, total) VALUES ($1, $2) RETURNING *",
+  [customerId, total],
+);
+```
+
+### Return type
+
+`ctx.db.query<T>()` returns `T[]` — an array of rows matching the generic type.
+
+## Kysely (type-safe queries)
+
+For type-safe query building, use the [Kysely](https://kysely.dev/) integration:
+
+```ts
+interface Database {
+  users: {
+    id: number;
+    email: string;
+    name: string;
+    created_at: string;
+  };
+  orders: {
+    id: number;
+    user_id: number;
+    total: number;
+    status: string;
+  };
+}
+
+const db = ctx.db.kysely<Database>();
+
+const activeUsers = await db
+  .selectFrom("users")
+  .where("email", "like", "%@example.com")
+  .selectAll()
+  .execute();
+
+const order = await db
+  .insertInto("orders")
+  .values({ user_id: 1, total: 99.99, status: "pending" })
+  .returningAll()
+  .executeTakeFirst();
+```
+
+## Migrations
+
+Define migrations in your app:
+
+```ts
+export default {
+  migrations: {
+    sqlite: [
+      {
+        name: "001_init",
+        sql: `
+          CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+          );
+        `,
+      },
+    ],
+    postgres: [
+      {
+        name: "001_init",
+        sql: `
+          CREATE TABLE users (
+            id BIGSERIAL PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `,
+      },
+    ],
+  },
+};
+```
+
+Or load from SQL files using a `chimpbase.migrations.ts` file.
+
+Migrations run automatically on startup.
+
+## Storage Configuration
+
+```toml
+[storage]
+engine = "postgres"                # "postgres" | "sqlite" | "memory"
+url = "postgresql://localhost/mydb" # for postgres
+path = "./data/app.db"             # for sqlite
+```
+
+Or via environment variables:
+
+```
+CHIMPBASE_STORAGE_ENGINE=postgres
+CHIMPBASE_DATABASE_URL=postgresql://localhost/mydb
+```
