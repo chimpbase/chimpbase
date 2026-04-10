@@ -56,7 +56,7 @@ chimpbaseWebhooks({
 })
 ```
 
-Worker retry behavior (max attempts, retry delay) is configured at the project level in `chimpbase.toml` under `[worker]`.
+Worker retry behavior (max attempts, retry delay) is configured at the project level in the app definition under `worker`.
 
 ---
 

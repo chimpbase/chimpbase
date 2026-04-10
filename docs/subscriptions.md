@@ -54,23 +54,11 @@ subscription("payment.captured", handlePayment, {
 });
 ```
 
-Idempotency markers can be cleaned up via the retention cron configured in `chimpbase.toml`:
-
-```toml
-[subscriptions.idempotency.retention]
-enabled = true
-max_age_days = 30
-schedule = "0 2 * * *"
-```
+Idempotency markers are cleaned up automatically when retention is enabled in the app configuration.
 
 ## Dispatch Mode
 
-Subscriptions can be dispatched synchronously or asynchronously, configured in `chimpbase.toml`:
-
-```toml
-[subscriptions]
-dispatch = "sync"   # or "async"
-```
+Subscriptions can be dispatched synchronously or asynchronously:
 
 - **sync** (default) — subscriptions run within the same transaction as the publisher
 - **async** — subscriptions run asynchronously after the publisher completes

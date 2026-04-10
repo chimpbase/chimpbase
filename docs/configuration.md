@@ -1,6 +1,6 @@
 # Configuration
 
-Chimpbase is configured through your app definition (`chimpbase.app.ts`), environment variables, and optionally a `chimpbase.toml` file.
+Chimpbase is configured through your app definition (`chimpbase.app.ts`) and environment variables.
 
 ## App Definition
 
@@ -28,67 +28,11 @@ export default {
 } satisfies ChimpbaseAppDefinitionInput;
 ```
 
-## chimpbase.toml
-
-Full configuration reference:
-
-```toml
-[project]
-name = "my-app"
-
-[server]
-port = 3000
-
-[storage]
-engine = "postgres"    # "postgres" | "sqlite" | "memory"
-url = "postgresql://localhost/mydb"
-path = "./data/app.db" # for sqlite
-
-[worker]
-concurrency = 4        # parallel workers (postgres only)
-lease_ms = 30000
-max_attempts = 5
-poll_interval_ms = 250
-retry_delay_ms = 1000
-
-[subscriptions]
-dispatch = "sync"      # "sync" | "async"
-
-[subscriptions.idempotency.retention]
-enabled = true
-max_age_days = 30
-schedule = "0 2 * * *"
-
-[kv.retention]
-enabled = false
-schedule = "0 3 * * *"
-
-[telemetry]
-min_level = "info"
-
-[telemetry.persist]
-log = true
-metric = true
-trace = true
-
-[telemetry.retention]
-enabled = true
-max_age_days = 30
-schedule = "0 4 * * *"
-
-[secrets]
-env_file = ".env"
-dir = "/run/secrets"
-
-[workflows]
-contracts_dir = "./workflow-contracts"
-```
-
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CHIMPBASE_STORAGE_ENGINE` | Storage engine | `sqlite` |
+| `CHIMPBASE_STORAGE_ENGINE` | Storage engine (`postgres`, `sqlite`, `memory`) | `sqlite` |
 | `CHIMPBASE_DATABASE_URL` or `DATABASE_URL` | PostgreSQL connection URL | — |
 | `CHIMPBASE_STORAGE_PATH` | SQLite file path | `data/{name}.db` |
 | `CHIMPBASE_WORKER_CONCURRENCY` | Worker concurrency | `1` |

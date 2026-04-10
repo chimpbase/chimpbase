@@ -385,7 +385,7 @@ export function chimpbaseWebhooks(
 ): ChimpbasePluginRegistration {
   const managementBasePath = options.managementBasePath === undefined ? "/_webhooks" : options.managementBasePath;
   const deliveryTimeoutMs = options.deliveryTimeoutMs ?? 10_000;
-  // Note: maxAttempts and retryDelayMs are configured at the project level in chimpbase.toml [worker]
+  // Note: maxAttempts and retryDelayMs are configured at the project level in the app definition under worker
 
   const entries: ChimpbaseRegistrationSource[] = [];
 

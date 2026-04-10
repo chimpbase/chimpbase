@@ -75,10 +75,4 @@ return data;
 
 ## TTL Cleanup
 
-Expired keys are automatically filtered on read. For storage reclamation, enable the optional cleanup cron in `chimpbase.toml`:
-
-```toml
-[kv.retention]
-enabled = true
-schedule = "0 3 * * *"  # 3 AM daily
-```
+Expired keys are automatically filtered on read. For storage reclamation, an optional cleanup cron can be enabled in the project configuration.

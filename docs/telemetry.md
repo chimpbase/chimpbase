@@ -98,10 +98,4 @@ const apiKey = ctx.secret("STRIPE_API_KEY");
 const sender = ctx.secret("EMAIL_SENDER") ?? "noreply@example.com";
 ```
 
-Configure secret sources in `chimpbase.toml`:
-
-```toml
-[secrets]
-env_file = ".env"
-dir = "/run/secrets"
-```
+Secrets are loaded from environment variables, `.env` files, and mounted secret directories (e.g., `/run/secrets`).

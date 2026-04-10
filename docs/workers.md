@@ -87,18 +87,18 @@ interface ChimpbaseDlqEnvelope<TPayload> {
 
 ## Configuration
 
-Worker behavior is configured globally in `chimpbase.toml`:
+Worker behavior is configured in the app definition:
 
-```toml
-[worker]
-concurrency = 4         # parallel workers (PostgreSQL only; SQLite always 1)
-lease_ms = 30000        # job lease duration
-max_attempts = 5        # retries before DLQ
-poll_interval_ms = 250  # poll frequency
-retry_delay_ms = 1000   # delay between retries
+```ts
+export default {
+  worker: {
+    maxAttempts: 5,     // retries before DLQ
+    retryDelayMs: 1000, // delay between retries
+  },
+} satisfies ChimpbaseAppDefinitionInput;
 ```
 
-Or via environment variables:
+Additional settings via environment variables:
 
 ```
 CHIMPBASE_WORKER_CONCURRENCY=4
