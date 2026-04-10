@@ -7,7 +7,7 @@ hero:
   actions:
     - theme: brand
       text: Get Started
-      link: /configuration
+      link: /getting-started
     - theme: alt
       text: GitHub
       link: https://github.com/chimpbase/chimpbase
