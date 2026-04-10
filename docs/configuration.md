@@ -82,21 +82,40 @@ Data is lost on restart. Used for unit tests.
 | Deno | `@chimpbase/deno` | `deno add npm:@chimpbase/deno` |
 | Node | `@chimpbase/node` | `npm install @chimpbase/node` |
 
-## Starting the Server
+## Custom Entry Point
+
+By default, `chimpbase.app.ts` is both your app definition and your entry point. For advanced scenarios (custom secrets loading, separate worker processes, environment-specific setup), create a separate `app.ts`:
 
 ```ts
 import { createChimpbase } from "@chimpbase/bun";
-import app from "./chimpbase.app.ts";
+import { loadLocalSecretStore } from "@chimpbase/tooling/secrets";
+import { normalizeProjectConfig } from "@chimpbase/core";
+import appDefinition from "./chimpbase.app.ts";
 
-const chimpbase = await createChimpbase({ ...app, projectDir: import.meta.dir });
-await chimpbase.start(); // starts HTTP server + worker
+const secrets = await loadLocalSecretStore(
+  import.meta.dir,
+  normalizeProjectConfig({ secrets: { dir: "run/secrets", envFile: ".env" } }),
+);
+
+const chimpbase = await createChimpbase({
+  ...appDefinition,
+  projectDir: import.meta.dir,
+  secrets,
+  storage: { engine: "postgres", url: process.env.DATABASE_URL! },
+});
+
+await chimpbase.start();
 ```
 
-Options for `start()`:
+### Start Options
 
 ```ts
-chimpbase.start({
-  serve: true,      // start HTTP server (default: true)
-  runWorker: true,   // start background worker (default: true)
-});
+// Start both HTTP server and background worker (default)
+chimpbase.start();
+
+// HTTP server only (no background worker)
+chimpbase.start({ serve: true, runWorker: false });
+
+// Worker only (no HTTP server)
+chimpbase.start({ serve: false, runWorker: true });
 ```

@@ -24,11 +24,15 @@ npm install @chimpbase/node
 
 ## Create Your App
 
-Create a `chimpbase.app.ts`:
+Create a `chimpbase.app.ts`. This is the only file you need:
 
 ```ts
 import type { ChimpbaseAppDefinitionInput } from "@chimpbase/bun";
-import { action, v } from "@chimpbase/runtime";
+import { action, subscription, worker, v } from "@chimpbase/runtime";
+import { Hono } from "hono";
+import type { ChimpbaseRouteEnv } from "@chimpbase/runtime";
+
+// ── Actions ─────────────────────────────────────────────────────────────
 
 const createCustomer = action({
   name: "createCustomer",
@@ -51,75 +55,61 @@ const createCustomer = action({
   },
 });
 
+// ── Subscriptions ───────────────────────────────────────────────────────
+
+const onCustomerCreated = subscription(
+  "customer.created",
+  async (ctx, payload) => {
+    await ctx.queue.enqueue("customer.welcome", payload);
+  },
+  { idempotent: true, name: "enqueueWelcome" },
+);
+
+// ── Workers ─────────────────────────────────────────────────────────────
+
+const sendWelcome = worker("customer.welcome", async (ctx, payload) => {
+  ctx.log.info("sending welcome email", { email: payload.email });
+});
+
+// ── HTTP Routes ─────────────────────────────────────────────────────────
+
+const api = new Hono<{ Bindings: ChimpbaseRouteEnv }>();
+
+api.post("/customers", async (c) => {
+  const body = await c.req.json();
+  const customer = await c.env.action(createCustomer, body);
+  return c.json(customer, 201);
+});
+
+// ── App Definition ──────────────────────────────────────────────────────
+
 export default {
   project: { name: "my-app" },
+  httpHandler: api,
   migrations: {
     sqlite: [{
       name: "001_init",
       sql: "CREATE TABLE customers (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, name TEXT NOT NULL)",
     }],
   },
-  registrations: [createCustomer],
+  registrations: [
+    createCustomer,
+    onCustomerCreated,
+    sendWelcome,
+  ],
 } satisfies ChimpbaseAppDefinitionInput;
 ```
 
-## Start the Server
-
-Create an `app.ts` entry point:
-
-```ts
-import { createChimpbase } from "@chimpbase/bun";
-import app from "./chimpbase.app.ts";
-
-const chimpbase = await createChimpbase({
-  ...app,
-  projectDir: import.meta.dir,
-});
-
-await chimpbase.start();
-```
-
-Run it:
+## Run It
 
 ```bash
-bun run app.ts
+bun run chimpbase.app.ts
 ```
 
-The server starts on port 3000 with a `/health` endpoint and a background worker.
-
-## Add HTTP Routes
-
-Use [Hono](https://hono.dev) for HTTP routing:
-
-```bash
-bun add hono
-```
-
-```ts
-import type { ChimpbaseRouteEnv } from "@chimpbase/runtime";
-import { Hono } from "hono";
-
-const app = new Hono<{ Bindings: ChimpbaseRouteEnv }>();
-
-app.post("/customers", async (c) => {
-  const body = await c.req.json();
-  const customer = await c.env.action("createCustomer", body);
-  return c.json(customer, 201);
-});
-
-export { app as httpApp };
-```
-
-Then set it as the `httpHandler` in your app definition:
-
-```ts
-import { httpApp } from "./http.ts";
-
-export default {
-  httpHandler: httpApp,
-  // ...
-} satisfies ChimpbaseAppDefinitionInput;
-```
+The server starts on port 3000 with:
+- A `/health` endpoint
+- Your HTTP routes (via Hono)
+- A background worker processing queued jobs
 
 ## Choose a Storage Engine
 
@@ -129,28 +119,22 @@ Default — no configuration needed. Data stored in `data/{project-name}.db`.
 
 ### PostgreSQL (production)
 
-```ts
-const chimpbase = await createChimpbase({
-  ...app,
-  storage: { engine: "postgres", url: process.env.DATABASE_URL! },
-});
-```
-
-Or set the environment variable:
+Set the environment variable:
 
 ```bash
 CHIMPBASE_STORAGE_ENGINE=postgres
 DATABASE_URL=postgresql://localhost/mydb
 ```
 
+PostgreSQL supports concurrent workers and coordination across multiple instances.
+
 ### Memory (testing)
 
-```ts
-const chimpbase = await createChimpbase({
-  ...app,
-  storage: { engine: "memory" },
-});
+```bash
+CHIMPBASE_STORAGE_ENGINE=memory
 ```
+
+Data is lost on restart. Used for unit tests.
 
 ## What's Next
 
@@ -161,7 +145,7 @@ const chimpbase = await createChimpbase({
 - [Workflows](/workflows) — long-running processes
 - [HTTP Routes](/routes) — handle HTTP requests with Hono
 - [Database](/database) — raw SQL and Kysely
-- [Configuration](/configuration) — environment variables and app definition options
+- [Configuration](/configuration) — environment variables, custom entry points, and advanced options
 
 ### Plugins
 
