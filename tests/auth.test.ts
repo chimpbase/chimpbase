@@ -787,4 +787,69 @@ describe("@chimpbase/auth", () => {
       host.close();
     }
   });
+
+  // ── Timing-safe bootstrap key comparison ──────────────────────────────
+
+  test("bootstrap key with wrong value is rejected", async () => {
+    const host = await createAuthHost();
+    try {
+      const outcome = await host.executeRoute(
+        new Request("http://test.local/some-path", { headers: { "x-api-key": "wrong-bootstrap-key" } }),
+      );
+      expect(outcome.response?.status).toBe(401);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("bootstrap key with same length but wrong value is rejected", async () => {
+    const host = await createAuthHost();
+    try {
+      // Same length as BOOTSTRAP_KEY ("test-bootstrap-key" = 18 chars)
+      const sameLength = "x".repeat(BOOTSTRAP_KEY.length);
+      const outcome = await host.executeRoute(
+        new Request("http://test.local/some-path", { headers: { "x-api-key": sameLength } }),
+      );
+      expect(outcome.response?.status).toBe(401);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("bootstrap key with partial prefix match is rejected", async () => {
+    const host = await createAuthHost();
+    try {
+      const partial = BOOTSTRAP_KEY.substring(0, 10) + "xxxxxxxx";
+      const outcome = await host.executeRoute(
+        new Request("http://test.local/some-path", { headers: { "x-api-key": partial } }),
+      );
+      expect(outcome.response?.status).toBe(401);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("bootstrap key with different length is rejected", async () => {
+    const host = await createAuthHost();
+    try {
+      const outcome = await host.executeRoute(
+        new Request("http://test.local/some-path", { headers: { "x-api-key": BOOTSTRAP_KEY + "extra" } }),
+      );
+      expect(outcome.response?.status).toBe(401);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("exact bootstrap key is accepted", async () => {
+    const host = await createAuthHost();
+    try {
+      const outcome = await host.executeRoute(
+        new Request("http://test.local/some-path", { headers: { "x-api-key": BOOTSTRAP_KEY } }),
+      );
+      expect(outcome.response).toBeNull();
+    } finally {
+      host.close();
+    }
+  });
 });
