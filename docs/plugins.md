@@ -99,12 +99,51 @@ plugin(
 | [Webhooks](/webhooks) | `@chimpbase/webhooks` | Outbound + inbound webhooks with HMAC and dedup |
 | [REST Collections](/rest-collections) | `@chimpbase/rest-collections` | Expose collections as REST APIs |
 
+## Middleware in Plugins
+
+Plugins often register middleware — routes that set [request context](/routes#request-context) or short-circuit before downstream handlers run. Use `middleware()` instead of `route()` to signal this intent:
+
+```ts
+import { middleware, plugin, action } from "@chimpbase/runtime";
+
+function corsPlugin() {
+  return plugin(
+    { name: "cors" },
+    middleware("cors.preflight", async (request, env) => {
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET, POST, PATCH, DELETE",
+            "access-control-allow-headers": "content-type, x-api-key, authorization",
+          },
+        });
+      }
+      return null; // pass through
+    }),
+  );
+}
+```
+
+Middleware runs in registration order. A plugin registered first in the `registrations` array runs before later plugins. This is how the auth plugin's guard route protects all other routes.
+
+Middleware can also pass data to downstream handlers via request context:
+
+```ts
+middleware("requestLogger", async (request, env) => {
+  env.set("request.startedAt", Date.now());
+  return null;
+});
+```
+
+See the [Routes](/routes#request-context) page for full request context documentation.
+
 ## Plugin Pattern
 
 The standard plugin pattern used by all official plugins:
 
 1. Export a function that accepts options and returns `ChimpbasePluginRegistration`
-2. Build an array of registrations (actions, routes, subscriptions, workers)
+2. Build an array of registrations (actions, routes, subscriptions, workers, middleware, lifecycle hooks)
 3. Wrap with `plugin()` to group and name them
 4. Use internal collection/KV namespaces prefixed with `__chimpbase.{pluginName}.*`
 5. Use internal action names prefixed with `__chimpbase.{pluginName}.*`
