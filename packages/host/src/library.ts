@@ -7,6 +7,7 @@ import {
   type ChimpbaseAppDefinitionInput,
   type ChimpbaseSecretsSource,
 } from "@chimpbase/core";
+import type { ChimpbaseTelemetrySink } from "@chimpbase/runtime";
 import { loadProjectAppDefinition } from "@chimpbase/tooling/app";
 import type { ChimpbaseSchemaSyncOptions, ChimpbaseSchemaSyncResult } from "@chimpbase/tooling/schema";
 import { syncChimpbaseSchemaArtifacts } from "@chimpbase/tooling/schema";
@@ -48,6 +49,7 @@ export interface CreateChimpbaseRuntimeOptions {
   server?: {
     port?: number;
   };
+  sinks?: ChimpbaseTelemetrySink[];
   storage?: {
     engine?: "memory" | "postgres" | "sqlite";
     path?: string | null;
@@ -291,6 +293,7 @@ export function createChimpbaseRuntimeLibrary<
       migrationsSql: options.migrationsSql,
       projectDir,
       secrets: options.secrets,
+      sinks: options.sinks,
     } satisfies CreateHostOptions);
   }
 

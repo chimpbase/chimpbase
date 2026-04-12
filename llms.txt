@@ -17,6 +17,7 @@
 - [packages/core](packages/core): Engine, registry contracts, orchestration internals, and telemetry buffering/persistence internals.
 - [packages/postgres](packages/postgres): Reusable Postgres adapter used by hosts.
 - [packages/tooling](packages/tooling): Project loading, config helpers, schema sync, workflow contract sync, migrations, and CLI support.
+- [packages/otel](packages/otel): Optional OpenTelemetry integration. Exports `createOtelSink()` which implements `ChimpbaseTelemetrySink` to bridge `ctx.log`, `ctx.metric`, and `ctx.trace` to OTel providers.
 
 ## Examples
 
@@ -35,6 +36,7 @@
 - `cron(...)` uses standard 5-field UTC cron expressions and runs through the same worker execution path.
 - `workflow(...)` is for long-running stateful processes that must survive restarts, time delays, and external signals.
 - Telemetry persistence is optional and can write logs, metrics, and traces to internal streams.
+- Telemetry sinks (`ChimpbaseTelemetrySink`) allow exporting `ctx.log`, `ctx.metric`, and `ctx.trace` to external systems. Pass `sinks: [createOtelSink()]` to `createChimpbase()` for OpenTelemetry export.
 - Published packages currently ship TypeScript source, not prebuilt `dist/` artifacts.
 
 ## Runtime Surface

@@ -83,6 +83,91 @@ cron("cleanup", "0 * * * *", handler, {
 });
 ```
 
+## OpenTelemetry Export
+
+Chimpbase can export telemetry to any OpenTelemetry-compatible backend (Jaeger, Grafana, Datadog, etc.) via the `@chimpbase/otel` package.
+
+### Install
+
+```bash
+bun add @chimpbase/otel
+```
+
+### Setup
+
+Pass a sink to `createChimpbase`:
+
+```ts
+import { createChimpbase } from "@chimpbase/bun";
+import { createOtelSink } from "@chimpbase/otel";
+
+const chimpbase = await createChimpbase({
+  app: myApp,
+  sinks: [createOtelSink()],
+});
+```
+
+Zero-config: `createOtelSink()` reads `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME` from environment variables.
+
+### Options
+
+```ts
+createOtelSink({
+  serviceName: "my-service",       // defaults to OTEL_SERVICE_NAME or "chimpbase-app"
+  endpoint: "http://localhost:4318", // OTLP HTTP endpoint
+  traceExporter: customExporter,   // custom SpanExporter
+  spanProcessor: customProcessor,  // custom SpanProcessor (e.g. SimpleSpanProcessor for tests)
+  metricExporter: customExporter,  // custom metric exporter
+  logExporter: customExporter,     // custom log exporter
+});
+```
+
+### What Gets Exported
+
+- **Handler spans**: Every action, worker, cron, and route execution creates a root span (e.g. `action:createUser`, `worker:email.sync`, `cron:cleanup`)
+- **Trace spans**: `ctx.trace()` calls become child spans of the handler span, with proper parent-child hierarchy for nested traces
+- **Logs**: `ctx.log.*()` calls emit OTel LogRecords with severity level
+- **Metrics**: `ctx.metric()` calls record OTel counter metrics
+
+All spans and logs include `chimpbase.scope.kind` and `chimpbase.scope.name` attributes.
+
+### Coexistence
+
+OTel export works alongside the existing telemetry features:
+
+- `drainTelemetryRecords()` continues to work for tests
+- Stream persistence (`telemetry.persist`) continues to write to internal streams
+- Sinks receive telemetry in parallel, not instead of existing mechanisms
+
+### Custom Sinks
+
+You can implement your own sink by implementing the `ChimpbaseTelemetrySink` interface from `@chimpbase/runtime`:
+
+```ts
+import type { ChimpbaseTelemetrySink } from "@chimpbase/runtime";
+
+const mySink: ChimpbaseTelemetrySink = {
+  onLog(scope, level, message, attributes) { /* ... */ },
+  onMetric(scope, name, value, labels) { /* ... */ },
+  startSpan(scope, name, attributes) {
+    return {
+      setAttribute(key, value) { /* ... */ },
+      end(status, errorMessage) { /* ... */ },
+    };
+  },
+  startHandlerSpan(scope) {
+    return {
+      setAttribute(key, value) { /* ... */ },
+      end(status, errorMessage) { /* ... */ },
+      runInContext(fn) { return fn(); },
+    };
+  },
+  async shutdown() { /* ... */ },
+};
+```
+
+The `runInContext` method is optional but enables proper parent-child span propagation when present.
+
 ## Secrets
 
 Access secrets from environment variables, `.env` files, or mounted secret directories:

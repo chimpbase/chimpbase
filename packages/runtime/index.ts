@@ -92,6 +92,36 @@ export interface ChimpbaseTraceSpan {
   setAttribute(key: string, value: string | number | boolean | null): void;
 }
 
+export interface ChimpbaseSinkSpan {
+  setAttribute(key: string, value: string | number | boolean): void;
+  end(status: "ok" | "error", errorMessage?: string): void;
+  runInContext?<T>(fn: () => T | Promise<T>): T | Promise<T>;
+}
+
+export interface ChimpbaseTelemetrySink {
+  onLog(
+    scope: { kind: string; name: string },
+    level: "debug" | "info" | "warn" | "error",
+    message: string,
+    attributes: ChimpbaseTelemetryAttributes,
+  ): void;
+  onMetric(
+    scope: { kind: string; name: string },
+    name: string,
+    value: number,
+    labels: ChimpbaseTelemetryAttributes,
+  ): void;
+  startSpan(
+    scope: { kind: string; name: string },
+    name: string,
+    attributes: ChimpbaseTelemetryAttributes,
+  ): ChimpbaseSinkSpan;
+  startHandlerSpan(
+    scope: { kind: string; name: string },
+  ): ChimpbaseSinkSpan;
+  shutdown?(): Promise<void>;
+}
+
 export interface ChimpbaseQueueEnqueueOptions {
   delayMs?: number;
 }

@@ -53,6 +53,7 @@ import {
   type ChimpbaseWorkerDefinition,
   type ChimpbaseWorkerHandler,
   type ChimpbaseWorkflowContract,
+  type ChimpbaseTelemetrySink,
   type ChimpbaseWorkflowDefinition,
 } from "@chimpbase/runtime";
 import { loadProjectMigrations } from "@chimpbase/tooling/migrations";
@@ -146,6 +147,7 @@ export interface CreateHostOptions {
   platform?: ChimpbasePlatformShim;
   projectDir?: string;
   secrets?: ChimpbaseSecretsSource;
+  sinks?: ChimpbaseTelemetrySink[];
 }
 
 export interface RuntimeHostInstanceOptions<TServer> {
@@ -702,6 +704,7 @@ export class ChimpbaseHost<TServer> {
 
   close(): void {
     this.engine.stopEventBus();
+    void this.engine.shutdownSinks();
     this.debug("runtime closed");
     void this.storage.close();
   }
@@ -829,6 +832,7 @@ export async function createRuntimeHost<TServer, THost extends ChimpbaseHost<TSe
     platform,
     registry,
     secrets,
+    sinks: options.sinks,
     subscriptions: {
       dispatch: options.config.subscriptions.dispatch,
     },
@@ -844,6 +848,7 @@ export async function createRuntimeHost<TServer, THost extends ChimpbaseHost<TSe
     platform,
     registry: cloneRegistryForWorkerEngine(registry),
     secrets,
+    sinks: options.sinks,
     subscriptions: {
       dispatch: options.config.subscriptions.dispatch,
     },

@@ -28,6 +28,8 @@ import type {
   ChimpbaseWorkflowStartResult,
   ChimpbaseWorkflowStepsDraftDefinition,
   ChimpbaseWorkflowStepDefinition,
+  ChimpbaseTelemetrySink,
+  ChimpbaseSinkSpan,
 } from "@chimpbase/runtime";
 import { resolveChimpbaseActionRegistrationName, runWithActionInvoker } from "@chimpbase/runtime";
 
@@ -252,6 +254,7 @@ export interface ChimpbaseEngineOptions {
   platform?: ChimpbasePlatformShim;
   registry: ChimpbaseRegistry;
   secrets: ChimpbaseSecretsSource;
+  sinks?: ChimpbaseTelemetrySink[];
   subscriptions: {
     dispatch: "async" | "sync";
   };
@@ -274,6 +277,7 @@ export class ChimpbaseEngine {
   private readonly platform: ChimpbasePlatformShim;
   private readonly registry: ChimpbaseRegistry;
   private readonly secrets: ChimpbaseEngineOptions["secrets"];
+  private readonly sinks: ChimpbaseTelemetrySink[];
   private readonly subscriptionsConfig: ChimpbaseEngineOptions["subscriptions"];
   private readonly telemetryConfig: ChimpbaseEngineOptions["telemetry"];
   private readonly telemetryRecords: ChimpbaseTelemetryRecord[] = [];
@@ -286,6 +290,7 @@ export class ChimpbaseEngine {
     this.platform = options.platform ?? createDefaultChimpbasePlatformShim();
     this.registry = options.registry;
     this.secrets = options.secrets;
+    this.sinks = options.sinks ?? [];
     this.subscriptionsConfig = options.subscriptions;
     this.telemetryConfig = options.telemetry;
     this.worker = options.worker;
@@ -354,41 +359,80 @@ export class ChimpbaseEngine {
 
   async executeAction(name: string, args: unknown[] = []): Promise<ChimpbaseActionExecutionResult> {
     const telemetryStart = this.telemetryRecords.length;
-    const result = await this.invokeActionByName(name, args);
-    const emittedEvents = this.takeCommittedEvents();
-    const allEmittedEvents = await this.handleCommittedEvents(emittedEvents, { kind: "action", name }, telemetryStart);
+    const scope: ChimpbaseExecutionScope = { kind: "action", name };
+    const handlerSpans = this.sinks.map((sink) => sink.startHandlerSpan(scope));
 
-    return {
-      emittedEvents: [...emittedEvents, ...allEmittedEvents],
-      result,
-    };
+    try {
+      let invoke: () => Promise<unknown> = () => this.invokeActionByName(name, args);
+      for (const span of handlerSpans) {
+        if (span.runInContext) {
+          const prev = invoke;
+          invoke = () => span.runInContext!(prev) as Promise<unknown>;
+        }
+      }
+
+      const result = await invoke();
+      const emittedEvents = this.takeCommittedEvents();
+      const allEmittedEvents = await this.handleCommittedEvents(emittedEvents, scope, telemetryStart);
+
+      for (const span of handlerSpans) span.end("ok");
+
+      return {
+        emittedEvents: [...emittedEvents, ...allEmittedEvents],
+        result,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const span of handlerSpans) span.end("error", message);
+      throw error;
+    }
   }
 
   async executeRoute(request: Request): Promise<ChimpbaseRouteExecutionResult> {
     const telemetryStart = this.telemetryRecords.length;
-    const routeEnv = this.createRouteEnv();
-    const response = await this.runWithActionInvoker(async () => {
-      for (const route of this.registry.routes) {
-        const matched = await route.handler(request, routeEnv);
-        if (matched !== null && matched !== undefined) {
-          return matched;
+    const url = new URL(request.url, "http://localhost");
+    const scope: ChimpbaseExecutionScope = { kind: "action", name: `route:${request.method} ${url.pathname}` };
+    const handlerSpans = this.sinks.map((sink) => sink.startHandlerSpan(scope));
+
+    try {
+      const routeEnv = this.createRouteEnv();
+      let invoke = async () => await this.runWithActionInvoker(async () => {
+        for (const route of this.registry.routes) {
+          const matched = await route.handler(request, routeEnv);
+          if (matched !== null && matched !== undefined) {
+            return matched;
+          }
+        }
+
+        if (!this.registry.httpHandler) {
+          return null;
+        }
+
+        return await this.registry.httpHandler(request, routeEnv);
+      });
+
+      for (const span of handlerSpans) {
+        if (span.runInContext) {
+          const prev = invoke;
+          invoke = () => span.runInContext!(prev) as Promise<Response | null>;
         }
       }
 
-      if (!this.registry.httpHandler) {
-        return null;
-      }
+      const response = await invoke();
+      const emittedEvents = this.takeCommittedEvents();
+      const allEmittedEvents = await this.handleCommittedEvents(emittedEvents, undefined, telemetryStart);
 
-      return await this.registry.httpHandler(request, routeEnv);
-    });
+      for (const span of handlerSpans) span.end("ok");
 
-    const emittedEvents = this.takeCommittedEvents();
-    const allEmittedEvents = await this.handleCommittedEvents(emittedEvents, undefined, telemetryStart);
-
-    return {
-      emittedEvents: [...emittedEvents, ...allEmittedEvents],
-      response,
-    };
+      return {
+        emittedEvents: [...emittedEvents, ...allEmittedEvents],
+        response,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const span of handlerSpans) span.end("error", message);
+      throw error;
+    }
   }
 
   async processNextCronSchedule(): Promise<ChimpbaseCronScheduleExecutionResult | null> {
@@ -538,23 +582,40 @@ export class ChimpbaseEngine {
       throw new Error(`queue handler not found: ${job.queue_name}`);
     }
 
+    const scope: ChimpbaseExecutionScope = { kind: "queue", name: job.queue_name };
+    const handlerSpans = this.sinks.map((sink) => sink.startHandlerSpan(scope));
+
     try {
       const payload = JSON.parse(job.payload_json) as unknown;
-      await this.runInTransaction(async () => {
-        await this.runWithActionInvoker(async () => {
-          await worker.handler(this.createContext({ kind: "queue", name: job.queue_name }), payload);
+
+      let invoke = async () => {
+        await this.runInTransaction(async () => {
+          await this.runWithActionInvoker(async () => {
+            await worker.handler(this.createContext(scope), payload);
+          });
         });
-      });
+      };
+
+      for (const span of handlerSpans) {
+        if (span.runInContext) {
+          const prev = invoke;
+          invoke = () => span.runInContext!(prev) as Promise<void>;
+        }
+      }
+
+      await invoke();
 
       const emittedEvents = this.takeCommittedEvents();
       const allEmittedEvents = await this.handleCommittedEvents(
         emittedEvents,
-        { kind: "queue", name: job.queue_name },
+        scope,
         telemetryStart,
       );
       const combinedEvents = [...emittedEvents, ...allEmittedEvents];
 
       await this.adapter.completeQueueJob(job.id);
+
+      for (const span of handlerSpans) span.end("ok");
 
       return {
         emittedEvents: combinedEvents,
@@ -564,6 +625,7 @@ export class ChimpbaseEngine {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.failQueueJob(job.id, job.queue_name, message, job.attempt_count);
+      for (const span of handlerSpans) span.end("error", message);
       throw error;
     }
   }
@@ -655,6 +717,12 @@ export class ChimpbaseEngine {
 
   drainTelemetryRecords(): ChimpbaseTelemetryRecord[] {
     return this.telemetryRecords.splice(0);
+  }
+
+  async shutdownSinks(): Promise<void> {
+    for (const sink of this.sinks) {
+      await sink.shutdown?.();
+    }
   }
 
   private async flushTelemetryToStreams(scope?: ChimpbaseExecutionScope, fromIndex = 0): Promise<void> {
@@ -774,10 +842,31 @@ export class ChimpbaseEngine {
       schedule: registration.schedule,
     };
 
-    await this.runWithActionInvoker(async () => await registration.handler(
-        this.createContext({ kind: "cron", name: payload.scheduleName }),
-        invocation,
-      ));
+    const scope: ChimpbaseExecutionScope = { kind: "cron", name: payload.scheduleName };
+    const handlerSpans = this.sinks.map((sink) => sink.startHandlerSpan(scope));
+
+    try {
+      let invoke = async () => {
+        await this.runWithActionInvoker(async () => await registration.handler(
+          this.createContext(scope),
+          invocation,
+        ));
+      };
+
+      for (const span of handlerSpans) {
+        if (span.runInContext) {
+          const prev = invoke;
+          invoke = () => span.runInContext!(prev) as Promise<void>;
+        }
+      }
+
+      await invoke();
+      for (const span of handlerSpans) span.end("ok");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const span of handlerSpans) span.end("error", message);
+      throw error;
+    }
   }
 
   private createContext(scope: ChimpbaseExecutionScope): ChimpbaseContext {
@@ -881,6 +970,7 @@ export class ChimpbaseEngine {
           timestamp: this.timestampNow(),
           value,
         });
+        for (const sink of this.sinks) sink.onMetric(scope, name, value, labels);
       },
       trace: async <TResult>(
         name: string,
@@ -903,8 +993,17 @@ export class ChimpbaseEngine {
           timestamp: this.timestampNow(),
         });
 
+        const sinkSpans = this.sinks.map((sink) => sink.startSpan(scope, name, { ...spanAttributes }));
+
         try {
-          const result = await callback(span);
+          let invoke: () => TResult | Promise<TResult> = () => callback(span);
+          for (const sinkSpan of sinkSpans) {
+            if (sinkSpan.runInContext) {
+              const prev = invoke;
+              invoke = () => sinkSpan.runInContext!(prev) as TResult | Promise<TResult>;
+            }
+          }
+          const result = await invoke();
           this.telemetryRecords.push({
             attributes: { ...spanAttributes },
             kind: "trace",
@@ -914,12 +1013,14 @@ export class ChimpbaseEngine {
             status: "ok",
             timestamp: this.timestampNow(),
           });
+          for (const sinkSpan of sinkSpans) sinkSpan.end("ok");
           return result;
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
           this.telemetryRecords.push({
             attributes: {
               ...spanAttributes,
-              error: error instanceof Error ? error.message : String(error),
+              error: errorMessage,
             },
             kind: "trace",
             name,
@@ -928,6 +1029,7 @@ export class ChimpbaseEngine {
             status: "error",
             timestamp: this.timestampNow(),
           });
+          for (const sinkSpan of sinkSpans) sinkSpan.end("error", errorMessage);
           throw error;
         }
       },
@@ -2016,6 +2118,7 @@ export class ChimpbaseEngine {
       scope,
       timestamp: this.timestampNow(),
     });
+    for (const sink of this.sinks) sink.onLog(scope, level, message, attributes);
   }
 
   private timestampNow(): string {

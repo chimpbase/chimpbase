@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 - 2026-04-11
+
+Adds telemetry sink interface and OpenTelemetry integration.
+
+### Added
+
+- added `ChimpbaseTelemetrySink` interface to `@chimpbase/runtime` for exporting telemetry to external systems
+- added `sinks` option to `createChimpbase()` for plugging in one or more telemetry sinks
+- added automatic handler spans for action, worker, cron, and route execution
+- added `runInContext` on sink spans for proper parent-child span propagation
+- added `@chimpbase/otel` package with `createOtelSink()` factory for OpenTelemetry export
+- `createOtelSink()` supports zero-config via `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME` env vars
+- added telemetry sink and OpenTelemetry integration test coverage
+- added OpenTelemetry documentation to the telemetry docs page
+
 ## 0.1.4 - 2026-03-11
 
 Adds optional telemetry stream persistence for `ctx.log`, `ctx.metric` and `ctx.trace`.
