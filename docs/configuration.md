@@ -76,11 +76,37 @@ Data is lost on restart. Used for unit tests.
 
 ## Runtime Hosts
 
-| Runtime | Package | Install |
-|---------|---------|---------|
-| Bun | `@chimpbase/bun` | `bun add @chimpbase/bun` |
-| Deno | `@chimpbase/deno` | `deno add npm:@chimpbase/deno` |
-| Node | `@chimpbase/node` | `npm install @chimpbase/node` |
+| Runtime | Package | Install | HTTP Server |
+|---------|---------|---------|-------------|
+| Bun | `@chimpbase/bun` | `bun add @chimpbase/bun` | `Bun.serve()` |
+| Deno | `@chimpbase/deno` | `deno add npm:@chimpbase/deno` | `Deno.serve()` |
+| Node | `@chimpbase/node` | `npm install @chimpbase/node` | `node:http.createServer()` |
+
+All three hosts expose the same API surface: `createChimpbase`, `loadChimpbaseApp`, `startChimpbaseApp`, `runChimpbaseAction`, `syncChimpbaseSchema`, and `syncChimpbaseWorkflowContracts`. Bun ships TypeScript directly with no build step. Node automatically adapts between its callback-based HTTP API and the Web standard `Request`/`Response` that Chimpbase expects.
+
+### Bun CLI
+
+```bash
+# Run the app
+bun run chimpbase.app.ts
+
+# Execute an action
+bun run chimpbase.app.ts action -- seedDemoWorkspace '[]'
+
+# Schema management
+bun run chimpbase.app.ts schema generate
+bun run chimpbase.app.ts schema check
+```
+
+### Deno CLI
+
+Deno includes a built-in `runDenoCli()`:
+
+```ts
+import { runDenoCli } from "@chimpbase/deno";
+
+await runDenoCli();
+```
 
 ## Custom Entry Point
 

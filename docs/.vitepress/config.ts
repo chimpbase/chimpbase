@@ -7,9 +7,17 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/" },
       { text: "Primitives", link: "/actions" },
+      { text: "Frameworks", link: "/hono" },
       { text: "Plugins", link: "/auth" },
     ],
     sidebar: [
+      {
+        text: "Why Chimpbase",
+        items: [
+          { text: "Just Use PostgreSQL", link: "/why-postgres" },
+          { text: "Explicit Primitives", link: "/why-primitives" },
+        ],
+      },
       {
         text: "Getting Started",
         items: [
@@ -33,6 +41,29 @@ export default defineConfig({
           { text: "Streams", link: "/streams" },
           { text: "Telemetry", link: "/telemetry" },
           { text: "Plugins", link: "/plugins" },
+        ],
+      },
+      {
+        text: "Context",
+        items: [
+          { text: "Overview", link: "/context" },
+          { text: "State & Storage", link: "/state" },
+        ],
+      },
+      {
+        text: "Frameworks",
+        items: [
+          { text: "Hono", link: "/hono" },
+          { text: "NestJS", link: "/nestjs" },
+          { text: "Express", link: "/express" },
+          { text: "Next.js", link: "/nextjs" },
+        ],
+      },
+      {
+        text: "Scaling",
+        items: [
+          { text: "App Composition", link: "/app-composition" },
+          { text: "Deployment", link: "/deployment" },
         ],
       },
       {
