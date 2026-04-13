@@ -43,6 +43,12 @@ export default defineConfig({
           { text: "REST Collections", link: "/rest-collections" },
         ],
       },
+      {
+        text: "Testing",
+        items: [
+          { text: "Contract Testing (Pact)", link: "/pact" },
+        ],
+      },
     ],
     socialLinks: [
       { icon: "github", link: "https://github.com/chimpbase/chimpbase" },

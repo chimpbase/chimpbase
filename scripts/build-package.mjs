@@ -36,6 +36,10 @@ const packageConfigs = {
     dir: "packages/otel",
     types: ["node"],
   },
+  pact: {
+    dir: "packages/pact",
+    types: ["node"],
+  },
   postgres: {
     dir: "packages/postgres",
     types: ["node"],

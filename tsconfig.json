@@ -21,7 +21,8 @@
       "@chimpbase/postgres": ["./packages/postgres/src/index.ts"],
       "@chimpbase/rest-collections": ["./packages/rest-collections/src/index.ts"],
       "@chimpbase/tooling": ["./packages/tooling/src/index.ts"],
-      "@chimpbase/tooling/*": ["./packages/tooling/src/*"]
+      "@chimpbase/tooling/*": ["./packages/tooling/src/*"],
+      "@chimpbase/pact": ["./packages/pact/src/index.ts"]
     }
   },
   "include": [
@@ -35,6 +36,7 @@
     "tests/**/*.ts",
     "packages/core/**/*.ts",
     "packages/runtime/**/*.ts",
+    "packages/pact/**/*.ts",
     "examples/**/*.ts"
   ],
   "exclude": [
