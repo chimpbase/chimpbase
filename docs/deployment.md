@@ -96,6 +96,7 @@ Chimpbase uses PostgreSQL for all coordination:
 - **Cron schedules** are durable — only one container fires each scheduled slot
 - **Subscriptions** with `idempotent: true` deduplicate across processes
 - **Workflows** persist state in PostgreSQL — any container can resume a workflow
+- **KV**, **Collections**, and **Streams** are stored in PostgreSQL — reads and writes from any replica see the same data immediately
 
 No separate broker, no leader election service, no external scheduler. PostgreSQL handles it.
 
@@ -108,3 +109,7 @@ When a single PostgreSQL instance becomes the bottleneck:
 - Shard workflows by tenant or domain
 
 But start here. One database, N containers, and the same `chimpbase.app.ts` everywhere.
+
+## Working example
+
+The [`factory-controller`](https://github.com/chimpbase/chimpbase/tree/main/examples/bun/factory-controller) example runs 3 replicas via Docker Compose with a shared PostgreSQL database. It exercises actions, idempotent subscriptions, workers, queues, cron, KV, collections, streams, and telemetry — all coordinating across replicas.

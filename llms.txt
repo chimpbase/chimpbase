@@ -25,6 +25,7 @@
 - [examples/bun/todo-ts-decorators](examples/bun/todo-ts-decorators): Decorators-based example.
 - [examples/bun/todo-ts-nestjs](examples/bun/todo-ts-nestjs): NestJS integration example.
 - [examples/bun/todo-ts-nestjs-decorators](examples/bun/todo-ts-nestjs-decorators): NestJS plus decorators example.
+- [examples/bun/factory-controller](examples/bun/factory-controller): Multi-replica Docker Compose example. Uses all primitives (actions, subscriptions, workers, queues, cron, KV, collections, streams, telemetry) with 3 replicas coordinating through PostgreSQL.
 
 ## Key Concepts
 
@@ -37,6 +38,7 @@
 - `workflow(...)` is for long-running stateful processes that must survive restarts, time delays, and external signals.
 - Telemetry persistence is optional and can write logs, metrics, and traces to internal streams.
 - Telemetry sinks (`ChimpbaseTelemetrySink`) allow exporting `ctx.log`, `ctx.metric`, and `ctx.trace` to external systems. Pass `sinks: [createOtelSink()]` to `createChimpbase()` for OpenTelemetry export.
+- Multiple containers running the same `chimpbase.app.ts` can share a single PostgreSQL database. Queues use row-level locking, cron fires once per slot regardless of replica count, and idempotent subscriptions deduplicate across processes.
 - Published packages currently ship TypeScript source, not prebuilt `dist/` artifacts.
 
 ## Runtime Surface

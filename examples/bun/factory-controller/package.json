@@ -1,0 +1,12 @@
+{
+  "name": "example-factory-controller",
+  "private": true,
+  "dependencies": {
+    "@chimpbase/bun": "^0.4.0",
+    "@chimpbase/otel": "^0.4.0",
+    "hono": "^4.12.5"
+  },
+  "scripts": {
+    "dev": "bun run app.ts"
+  }
+}
