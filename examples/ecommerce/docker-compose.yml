@@ -1,0 +1,50 @@
+services:
+  postgres-pim:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ecommerce_pim
+      POSTGRES_USER: chimpbase
+      POSTGRES_PASSWORD: chimpbase
+    ports:
+      - "5440:5432"
+    volumes:
+      - pgdata_pim:/var/lib/postgresql/data
+
+  postgres-inventory:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ecommerce_inventory
+      POSTGRES_USER: chimpbase
+      POSTGRES_PASSWORD: chimpbase
+    ports:
+      - "5441:5432"
+    volumes:
+      - pgdata_inventory:/var/lib/postgresql/data
+
+  postgres-payments:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ecommerce_payments
+      POSTGRES_USER: chimpbase
+      POSTGRES_PASSWORD: chimpbase
+    ports:
+      - "5442:5432"
+    volumes:
+      - pgdata_payments:/var/lib/postgresql/data
+
+  postgres-orders:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ecommerce_orders
+      POSTGRES_USER: chimpbase
+      POSTGRES_PASSWORD: chimpbase
+    ports:
+      - "5443:5432"
+    volumes:
+      - pgdata_orders:/var/lib/postgresql/data
+
+volumes:
+  pgdata_pim:
+  pgdata_inventory:
+  pgdata_payments:
+  pgdata_orders:
