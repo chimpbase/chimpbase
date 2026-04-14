@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/otel",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "OpenTelemetry integration for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -38,7 +38,7 @@
     "prepack": "node ../../scripts/build-package.mjs runtime otel"
   },
   "dependencies": {
-    "@chimpbase/runtime": "0.4.0",
+    "@chimpbase/runtime": "0.4.1",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/api-logs": "^0.200.0",
     "@opentelemetry/context-async-hooks": "^2.0.0",
