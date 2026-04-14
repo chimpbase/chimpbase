@@ -22,7 +22,10 @@
       "@chimpbase/rest-collections": ["./packages/rest-collections/src/index.ts"],
       "@chimpbase/tooling": ["./packages/tooling/src/index.ts"],
       "@chimpbase/tooling/*": ["./packages/tooling/src/*"],
-      "@chimpbase/pact": ["./packages/pact/src/index.ts"]
+      "@chimpbase/pact": ["./packages/pact/src/index.ts"],
+      "@chimpbase/auth": ["./packages/auth/src/index.ts"],
+      "@chimpbase/webhooks": ["./packages/webhooks/src/index.ts"],
+      "@chimpbase/otel": ["./packages/otel/src/index.ts"]
     }
   },
   "include": [
@@ -37,6 +40,9 @@
     "packages/core/**/*.ts",
     "packages/runtime/**/*.ts",
     "packages/pact/**/*.ts",
+    "packages/auth/**/*.ts",
+    "packages/webhooks/**/*.ts",
+    "packages/otel/**/*.ts",
     "examples/**/*.ts"
   ],
   "exclude": [
