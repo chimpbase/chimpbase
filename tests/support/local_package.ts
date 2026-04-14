@@ -1,5 +1,5 @@
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 export async function installLocalPackage(
   projectDir: string,
@@ -9,7 +9,13 @@ export async function installLocalPackage(
 ): Promise<void> {
   const packageDir = resolve(projectDir, "node_modules", ...packageName.split("/"));
   await mkdir(dirname(packageDir), { recursive: true });
-  await cp(sourceRoot, packageDir, { recursive: true });
+  await cp(sourceRoot, packageDir, {
+    recursive: true,
+    filter: (source) => {
+      const name = basename(source);
+      return name !== "node_modules" && name !== "dist";
+    },
+  });
   await pointLocalPackageExportsToSource(packageDir, entrypoint);
 }
 
