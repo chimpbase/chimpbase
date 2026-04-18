@@ -63,6 +63,55 @@ Subscriptions can be dispatched synchronously or asynchronously:
 - **sync** (default) — subscriptions run within the same transaction as the publisher
 - **async** — subscriptions run asynchronously after the publisher completes
 
+## Cross-Process Fanout
+
+By default, subscriptions dispatch **in the same process** that published the event. A publish in container A does **not** reach subscribers in container B unless one of the following is wired up:
+
+1. **Async dispatch + shared storage** — with `subscriptions.dispatch: "async"`, the engine enqueues dispatch jobs on the internal `__chimpbase.subscription.run` queue. Any worker consuming that queue — including a different container backed by the same storage (e.g. shared Postgres) — can pick up and run the subscription.
+2. **`ChimpbaseEventBus` transport** — a pluggable interface on the engine that publishes committed events to a broker and delivers them to peer processes that call `engine.startEventBus()`.
+
+The default `eventBus` is `NoopEventBus` — publish is a no-op, nothing crosses process boundaries.
+
+### Event bus transports
+
+`@chimpbase/postgres` ships two implementations:
+
+| Transport | Delivery | Notes |
+|-----------|----------|-------|
+| `PostgresPollingEventBus` | Polls `_chimpbase_events` table | No payload cap. Higher latency (poll interval). No extra infra beyond the existing Postgres adapter. |
+| `PostgresListenEventBus` | `LISTEN`/`NOTIFY` | Push-based, sub-ms latency. Payload cap ~7800B per event — throws `PayloadTooLargeError` above the limit. |
+
+### Wiring `PostgresListenEventBus`
+
+```ts
+import { ChimpbaseEngine } from "@chimpbase/core";
+import { PostgresListenEventBus, openPostgresPool } from "@chimpbase/postgres";
+
+const pool = openPostgresPool(config);
+const eventBus = new PostgresListenEventBus({ pool });
+
+const engine = new ChimpbaseEngine({
+  adapter,
+  eventBus,
+  // ...
+});
+
+engine.startEventBus();
+```
+
+Each process gets a unique `originId` — events published by a process are filtered out of its own `LISTEN` stream, so in-process subscriptions are not double-dispatched.
+
+### Payload size
+
+`PostgresListenEventBus` sends the full event envelope through `pg_notify`. Postgres caps `NOTIFY` payloads at 8000 bytes; the transport leaves headroom at 7800 bytes and throws `PayloadTooLargeError` when an envelope exceeds it. The event is still persisted (commit already happened) — only the fanout is skipped. Switch to `PostgresPollingEventBus` or a transport built on Redis Streams / NATS JetStream for larger payloads.
+
+### Choosing a transport
+
+- **Single container** — leave `eventBus` unset (`NoopEventBus`). In-process dispatch is all you need.
+- **Multiple containers, small payloads, low latency** — `PostgresListenEventBus`.
+- **Multiple containers, large payloads, tolerant of poll latency** — `PostgresPollingEventBus`.
+- **High throughput, replay, or durable subscriber groups** — implement `ChimpbaseEventBus` against Redis Streams, NATS JetStream, or Kafka.
+
 ## Common Patterns
 
 ### Enqueue background work

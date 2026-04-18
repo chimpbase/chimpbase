@@ -21,6 +21,11 @@ import type {
 import { createPostgresKysely } from "./kysely.ts";
 
 export { PostgresPollingEventBus, type PostgresPollingEventBusOptions } from "./event-bus.ts";
+export {
+  PayloadTooLargeError,
+  PostgresListenEventBus,
+  type PostgresListenEventBusOptions,
+} from "./listen-event-bus.ts";
 
 interface PersistedCollectionDocument {
   document_id: string;
