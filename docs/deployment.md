@@ -112,4 +112,4 @@ But start here. One database, N containers, and the same `chimpbase.app.ts` ever
 
 ## Working example
 
-The [`factory-controller`](https://github.com/chimpbase/chimpbase/tree/main/examples/bun/factory-controller) example runs 3 replicas via Docker Compose with a shared PostgreSQL database. It exercises actions, idempotent subscriptions, workers, queues, cron, KV, collections, streams, and telemetry — all coordinating across replicas.
+The [`advanced`](https://github.com/chimpbase/chimpbase/tree/main/examples/bun/advanced) example runs 3 replicas via Docker Compose with a shared PostgreSQL database. It exercises actions, idempotent subscriptions, workers, queues, cron, workflows, KV, collections, streams, plugins, and telemetry — all coordinating across replicas.

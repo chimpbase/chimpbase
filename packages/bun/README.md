@@ -189,22 +189,20 @@ bun install
 bun test
 ```
 
-Run the plain TypeScript example from the monorepo root:
+Run the basic example from the monorepo root:
 
 ```bash
-cp examples/bun/todo-ts/.env.example examples/bun/todo-ts/.env
-export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/chimpbase
-bun run dev:todo-ts
+bun run dev:bun:basic
 ```
 
-Run an action directly from the monorepo root:
+For Postgres-backed examples (`intermediate`, `advanced`):
 
 ```bash
 export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/chimpbase
-bun run --filter @chimpbase/example-todo-ts action -- seedDemoWorkspace '[]'
+bun run dev:bun:intermediate
 ```
 
-If you want the intended experience, start with `examples/bun/todo-ts`, but install dependencies only once at the repository root.
+Start with `examples/bun/basic` for the smallest runnable shape. Install dependencies only once at the repository root.
 
 ## What this is good for
 
@@ -262,7 +260,7 @@ The important bit is the execution model:
 - the next fire time is advanced before the handler runs
 - the handler itself runs through the worker path, so retries and failure handling stay consistent
 
-For a concrete example in this repo, see `examples/bun/todo-ts/src/modules/todos/todo.cron.ts`.
+For a concrete example in this repo, see `examples/bun/intermediate` (cron lives under `src/modules/orders/order.cron.ts`).
 
 ## Durable workflows
 
@@ -353,13 +351,11 @@ That gives you versioned snapshots and compatibility checks without introducing 
 
 ## Examples
 
-The repo currently ships with:
+The repo ships a three-rung ladder per runtime (`bun`, `node`, `deno`):
 
-- `examples/bun/todo-ts`
-- `examples/bun/todo-ts` includes a cron example in `src/modules/todos/todo.cron.ts`
-- `examples/bun/todo-ts-decorators`
-- `examples/bun/todo-ts-nestjs`
-- `examples/bun/todo-ts-nestjs-decorators`
+- `examples/bun/basic` — action + `route()` over SQLite
+- `examples/bun/intermediate` — adds subscriptions, workers, cron, Postgres
+- `examples/bun/advanced` — workflow, collections, KV, streams, plugins, multi-replica Docker Compose
 
 ## Telemetry persistence
 

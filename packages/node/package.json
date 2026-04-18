@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/node",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Node.js host for building action-driven backends on Postgres or SQLite with minimal boilerplate.",
   "license": "Apache-2.0",
   "type": "module",
@@ -46,11 +46,11 @@
     "prepack": "node ../../scripts/build-package.mjs node"
   },
   "dependencies": {
-    "@chimpbase/core": "0.4.1",
-    "@chimpbase/host": "0.4.1",
-    "@chimpbase/postgres": "0.4.1",
-    "@chimpbase/runtime": "0.4.1",
-    "@chimpbase/tooling": "0.4.1",
+    "@chimpbase/core": "0.4.2",
+    "@chimpbase/host": "0.4.2",
+    "@chimpbase/postgres": "0.4.2",
+    "@chimpbase/runtime": "0.4.2",
+    "@chimpbase/tooling": "0.4.2",
     "kysely": "^0.28.11"
   },
   "devDependencies": {

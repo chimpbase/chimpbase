@@ -9,6 +9,7 @@ export default defineConfig({
       { text: "Primitives", link: "/actions" },
       { text: "Frameworks", link: "/hono" },
       { text: "Plugins", link: "/auth" },
+      { text: "llms.txt", link: "/llms.txt", target: "_blank", rel: "noopener" },
     ],
     sidebar: [
       {

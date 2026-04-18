@@ -1,0 +1,6 @@
+node_modules
+data
+.env
+run/secrets
+**/dist
+**/node_modules

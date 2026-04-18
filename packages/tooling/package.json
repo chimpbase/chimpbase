@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/tooling",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Local tooling, config loading and CLI helpers for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -77,8 +77,8 @@
     "prepack": "node ../../scripts/build-package.mjs tooling"
   },
   "dependencies": {
-    "@chimpbase/core": "0.4.1",
-    "@chimpbase/runtime": "0.4.1",
+    "@chimpbase/core": "0.4.2",
+    "@chimpbase/runtime": "0.4.2",
     "kysely": "^0.28.11",
     "pg": "^8.16.3"
   }

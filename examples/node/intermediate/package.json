@@ -1,0 +1,23 @@
+{
+  "name": "@chimpbase/example-node-intermediate",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@chimpbase/core": "workspace:*",
+    "@chimpbase/node": "workspace:*",
+    "@chimpbase/runtime": "workspace:*",
+    "hono": "^4.12.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  },
+  "scripts": {
+    "dev": "node --import tsx/esm app.ts",
+    "test": "node --import tsx/esm --test tests/app/order-domain.nodetest.ts tests/e2e/runtime.e2e.nodetest.ts",
+    "test:app": "node --import tsx/esm --test tests/app/order-domain.nodetest.ts",
+    "test:e2e": "node --import tsx/esm --test tests/e2e/runtime.e2e.nodetest.ts"
+  }
+}

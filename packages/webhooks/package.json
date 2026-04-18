@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/webhooks",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Webhook delivery with HMAC-SHA256 validation plugin for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -37,6 +37,6 @@
     "prepack": "node ../../scripts/build-package.mjs runtime webhooks"
   },
   "dependencies": {
-    "@chimpbase/runtime": "0.4.1"
+    "@chimpbase/runtime": "0.4.2"
   }
 }

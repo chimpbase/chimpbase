@@ -200,10 +200,11 @@ Use `ctx.db.query(...)` for raw SQL and `ctx.db.kysely<T>()` for type-safe queri
 
 ## Examples
 
-- `examples/bun/todo-ts` for a modular TypeScript app with HTTP, actions, subscriptions, workers and cron
-- `examples/bun/todo-ts-decorators` for decorator-based registration
-- `examples/bun/todo-ts-nestjs` for NestJS integration
-- `examples/load-test` for single-process capacity testing with SQLite and PostgreSQL
+The `examples/` ladder under [`examples/bun`](examples/bun), [`examples/node`](examples/node), and [`examples/deno`](examples/deno) covers three rungs per runtime:
+
+- `basic` — actions + `route()` over SQLite. The smallest runnable app.
+- `intermediate` — adds subscriptions, workers, cron, and Postgres.
+- `advanced` — adds `workflow`, collections, KV, streams, plugins (`@chimpbase/auth`, `@chimpbase/webhooks`, `@chimpbase/rest-collections`, `@chimpbase/otel`), and multi-replica Docker Compose.
 
 ## When Chimpbase Is A Good Fit
 

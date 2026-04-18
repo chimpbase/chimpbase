@@ -1,0 +1,14 @@
+{
+  "name": "@chimpbase/example-bun-basic",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@chimpbase/bun": "workspace:*",
+    "@chimpbase/core": "workspace:*",
+    "@chimpbase/runtime": "workspace:*"
+  },
+  "scripts": {
+    "dev": "bun run app.ts",
+    "test": "bun test tests"
+  }
+}

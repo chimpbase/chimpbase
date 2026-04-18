@@ -1,0 +1,17 @@
+{
+  "name": "@chimpbase/example-bun-intermediate",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@chimpbase/bun": "workspace:*",
+    "@chimpbase/core": "workspace:*",
+    "@chimpbase/runtime": "workspace:*",
+    "hono": "^4.12.5"
+  },
+  "scripts": {
+    "dev": "bun run app.ts",
+    "test": "bun test tests",
+    "test:app": "bun test tests/app",
+    "test:e2e": "bun test tests/e2e"
+  }
+}
