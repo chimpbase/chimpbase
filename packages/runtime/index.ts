@@ -760,6 +760,7 @@ export interface ChimpbaseRegistrationTarget {
   registerRoute?(name: string, handler: ChimpbaseRouteHandler): ChimpbaseRouteHandler;
   registerOnStart?(name: string, handler: (ctx: ChimpbaseContext<any>) => Promise<void> | void): void;
   registerOnStop?(name: string, handler: () => Promise<void> | void): void;
+  registerContextExtension?(registration: ChimpbaseContextExtensionRegistration<any>): void;
   registerWorkflow<TInput = unknown, TState = unknown>(
     definition: ChimpbaseWorkflowDefinition<TInput, TState>,
   ): ChimpbaseWorkflowDefinition<TInput, TState>;
@@ -894,8 +895,24 @@ export interface ChimpbaseVersionedWorkflow<TInput = unknown, TState = unknown> 
   definition: ChimpbaseWorkflowDefinition<TInput, TState>;
 }
 
+export type ChimpbaseContextExtensionFactory<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry> = (
+  ctx: ChimpbaseContext<TActions>,
+) => unknown;
+
+export type ChimpbaseRouteEnvExtensionFactory<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry> = (
+  env: ChimpbaseRouteEnv<TActions>,
+) => unknown;
+
+export interface ChimpbaseContextExtensionRegistration<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry> {
+  context?: ChimpbaseContextExtensionFactory<TActions>;
+  key: string;
+  kind: "contextExtension";
+  routeEnv?: ChimpbaseRouteEnvExtensionFactory<TActions>;
+}
+
 export type ChimpbaseRegistration =
   | ChimpbaseActionRegistration<any, any>
+  | ChimpbaseContextExtensionRegistration<any>
   | ChimpbaseCronRegistration<any>
   | ChimpbaseOnStartRegistration<any>
   | ChimpbaseOnStopRegistration
@@ -1123,6 +1140,29 @@ export function onStop(
   handler: () => Promise<void> | void,
 ): ChimpbaseOnStopRegistration {
   return { handler, kind: "onStop", name };
+}
+
+export function contextExtension<TActions extends ChimpbaseActionMap = ChimpbaseActionRegistry>(
+  key: string,
+  factories: {
+    context?: ChimpbaseContextExtensionFactory<TActions>;
+    routeEnv?: ChimpbaseRouteEnvExtensionFactory<TActions>;
+  },
+): ChimpbaseContextExtensionRegistration<TActions> {
+  if (!key) {
+    throw new Error("context extension key cannot be empty");
+  }
+
+  if (!factories.context && !factories.routeEnv) {
+    throw new Error(`context extension "${key}" must provide at least one of context or routeEnv`);
+  }
+
+  return {
+    context: factories.context,
+    key,
+    kind: "contextExtension",
+    routeEnv: factories.routeEnv,
+  };
 }
 
 export function plugin(
@@ -1436,6 +1476,13 @@ export function register(
         break;
       case "onStop":
         target.registerOnStop?.(entry.name, entry.handler);
+        break;
+      case "contextExtension":
+        if (typeof target.registerContextExtension !== "function") {
+          throw new Error(`registration target does not support context extensions: ${entry.key}`);
+        }
+
+        target.registerContextExtension(entry);
         break;
     }
   }
@@ -2101,6 +2148,7 @@ function isChimpbaseRegistration(value: unknown): value is ChimpbaseRegistration
         || (value as { kind?: unknown }).kind === "workflow"
         || (value as { kind?: unknown }).kind === "onStart"
         || (value as { kind?: unknown }).kind === "onStop"
+        || (value as { kind?: unknown }).kind === "contextExtension"
       ),
   );
 }

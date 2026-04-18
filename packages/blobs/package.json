@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/blobs",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Blob storage primitive and drivers for Chimpbase (filesystem + in-memory).",
   "license": "Apache-2.0",
   "type": "module",
@@ -37,7 +37,7 @@
     "prepack": "node ../../scripts/build-package.mjs blobs"
   },
   "dependencies": {
-    "@chimpbase/core": "0.5.0",
-    "@chimpbase/runtime": "0.5.0"
+    "@chimpbase/core": "0.6.0",
+    "@chimpbase/runtime": "0.6.0"
   }
 }

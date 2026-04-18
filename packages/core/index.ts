@@ -2,6 +2,7 @@ import type {
   ChimpbaseActionHandler,
   ChimpbaseObjectActionHandler,
   ChimpbaseActionRegistration,
+  ChimpbaseContextExtensionRegistration,
   ChimpbaseTupleActionHandler,
   ChimpbaseValidator,
   ChimpbaseCronHandler,
@@ -184,6 +185,7 @@ export interface ChimpbaseSubscriptionEntry {
 
 export interface ChimpbaseRegistry {
   actions: Map<string, ChimpbaseActionRegistration<any, any, any>>;
+  contextExtensions: ChimpbaseContextExtensionRegistration<any>[];
   crons: Map<string, ChimpbaseCronRegistration>;
   httpHandler: ChimpbaseRouteHandler | null;
   onStartHooks: Array<{ handler: (ctx: any) => Promise<void> | void; name: string }>;
@@ -320,6 +322,7 @@ export function defineChimpbaseApp(
 export function createChimpbaseRegistry(): ChimpbaseRegistry {
   return {
     actions: new Map(),
+    contextExtensions: [],
     crons: new Map(),
     httpHandler: null,
     onStartHooks: [],

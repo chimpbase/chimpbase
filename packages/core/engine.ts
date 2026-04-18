@@ -931,7 +931,7 @@ export class ChimpbaseEngine {
   createRouteEnv(): ChimpbaseRouteEnv {
     const contextMap = new Map<string, unknown>();
     const blobsClient = this.createBlobsClient();
-    return {
+    const env: ChimpbaseRouteEnv = {
       action: async <TArgs extends unknown[] = unknown[], TResult = unknown>(
         nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
         ...args: TArgs
@@ -944,6 +944,7 @@ export class ChimpbaseEngine {
         contextMap.set(key, value);
       },
     };
+    return this.applyRouteEnvExtensions(env);
   }
 
   async executeLifecycleHook(
@@ -1019,7 +1020,7 @@ export class ChimpbaseEngine {
       }
     };
 
-    return {
+    const context: ChimpbaseContext = {
       db: {
         query: <T = Record<string, unknown>>(sql: string, params: readonly unknown[] = []) =>
           this.adapter.query<T>(sql, params),
@@ -1174,6 +1175,43 @@ export class ChimpbaseEngine {
         ...args: TArgs
       ): Promise<TResult> => await this.invokeAction<TResult>(nameOrReference, args),
     };
+    return this.applyContextExtensions(context);
+  }
+
+  private applyContextExtensions(context: ChimpbaseContext): ChimpbaseContext {
+    const extensions = this.registry.contextExtensions;
+    if (!extensions || extensions.length === 0) {
+      return context;
+    }
+
+    const target = context as ChimpbaseContext & Record<string, unknown>;
+    for (const extension of extensions) {
+      if (!extension.context) {
+        continue;
+      }
+
+      target[extension.key] = extension.context(context);
+    }
+
+    return context;
+  }
+
+  private applyRouteEnvExtensions(env: ChimpbaseRouteEnv): ChimpbaseRouteEnv {
+    const extensions = this.registry.contextExtensions;
+    if (!extensions || extensions.length === 0) {
+      return env;
+    }
+
+    const target = env as ChimpbaseRouteEnv & Record<string, unknown>;
+    for (const extension of extensions) {
+      if (!extension.routeEnv) {
+        continue;
+      }
+
+      target[extension.key] = extension.routeEnv(env);
+    }
+
+    return env;
   }
 
   private async startWorkflow<TInput = unknown, TState = unknown>(

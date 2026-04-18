@@ -98,6 +98,7 @@ plugin(
 | [Auth](/auth) | `@chimpbase/auth` | API key authentication, user management, scopes, rate limiting |
 | [Webhooks](/webhooks) | `@chimpbase/webhooks` | Outbound + inbound webhooks with HMAC and dedup |
 | [REST Collections](/rest-collections) | `@chimpbase/rest-collections` | Expose collections as REST APIs |
+| [Mesh](/mesh) | `@chimpbase/mesh` | Services and distributed registry across multiple nodes |
 
 ## Middleware in Plugins
 

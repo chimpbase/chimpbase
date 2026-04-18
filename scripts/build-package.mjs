@@ -28,6 +28,10 @@ const packageConfigs = {
     dir: "packages/host",
     types: ["node"],
   },
+  mesh: {
+    dir: "packages/mesh",
+    types: ["node"],
+  },
   deno: {
     dir: "packages/deno",
     types: ["node"],

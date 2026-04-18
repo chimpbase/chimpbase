@@ -26,7 +26,8 @@
       "@chimpbase/auth": ["./packages/auth/src/index.ts"],
       "@chimpbase/blobs": ["./packages/blobs/src/index.ts"],
       "@chimpbase/webhooks": ["./packages/webhooks/src/index.ts"],
-      "@chimpbase/otel": ["./packages/otel/src/index.ts"]
+      "@chimpbase/otel": ["./packages/otel/src/index.ts"],
+      "@chimpbase/mesh": ["./packages/mesh/src/index.ts"]
     }
   },
   "include": [
@@ -45,6 +46,7 @@
     "packages/blobs/**/*.ts",
     "packages/webhooks/**/*.ts",
     "packages/otel/**/*.ts",
+    "packages/mesh/**/*.ts",
     "examples/**/*.ts"
   ],
   "exclude": [

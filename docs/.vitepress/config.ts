@@ -74,6 +74,7 @@ export default defineConfig({
           { text: "Auth", link: "/auth" },
           { text: "Webhooks", link: "/webhooks" },
           { text: "REST Collections", link: "/rest-collections" },
+          { text: "Mesh", link: "/mesh" },
         ],
       },
       {

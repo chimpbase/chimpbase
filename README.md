@@ -198,6 +198,10 @@ Use `workflow(...)` when a business process has to survive time, restarts and re
 
 Use `ctx.blobs` (from `@chimpbase/blobs`) for binary object storage with S3-like semantics: buckets, keys, metadata, multipart uploads, signed URLs, copy, listing. The default driver writes files under a configurable root so plain `rsync` can mirror them for backup.
 
+### `service` + `ctx.mesh`
+
+Use `service()` and `chimpbaseMesh()` (from `@chimpbase/mesh`) to group actions into versioned services and discover peers across nodes automatically. Each node advertises into a Postgres registry table and reaches remote actions via `ctx.mesh.call(...)` — no extra broker.
+
 ### `ctx.db`
 
 Use `ctx.db.query(...)` for raw SQL and `ctx.db.kysely<T>()` for type-safe queries via Kysely.

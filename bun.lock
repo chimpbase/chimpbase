@@ -124,14 +124,14 @@
     },
     "packages/auth": {
       "name": "@chimpbase/auth",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/runtime": "0.4.2",
       },
     },
     "packages/blobs": {
       "name": "@chimpbase/blobs",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/core": "0.4.2",
         "@chimpbase/runtime": "0.4.2",
@@ -139,7 +139,7 @@
     },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
@@ -159,7 +159,7 @@
     },
     "packages/core": {
       "name": "@chimpbase/core",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/runtime": "0.4.2",
         "kysely": "^0.28.11",
@@ -167,7 +167,7 @@
     },
     "packages/deno": {
       "name": "@chimpbase/deno",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/core": "0.1.24",
         "@chimpbase/host": "0.1.24",
@@ -182,7 +182,7 @@
     },
     "packages/host": {
       "name": "@chimpbase/host",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/core": "0.4.2",
         "@chimpbase/postgres": "0.4.2",
@@ -191,9 +191,16 @@
         "kysely": "^0.28.11",
       },
     },
+    "packages/mesh": {
+      "name": "@chimpbase/mesh",
+      "version": "0.5.0",
+      "dependencies": {
+        "@chimpbase/runtime": "0.5.0",
+      },
+    },
     "packages/node": {
       "name": "@chimpbase/node",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "bin": {
         "chimpbase-node": "./dist/src/cli.js",
       },
@@ -212,7 +219,7 @@
     },
     "packages/otel": {
       "name": "@chimpbase/otel",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/runtime": "0.4.2",
         "@opentelemetry/api": "^1.9.0",
@@ -230,7 +237,7 @@
     },
     "packages/pact": {
       "name": "@chimpbase/pact",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/core": "0.4.0",
         "@chimpbase/runtime": "0.4.0",
@@ -238,7 +245,7 @@
     },
     "packages/postgres": {
       "name": "@chimpbase/postgres",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/core": "0.4.2",
         "@chimpbase/runtime": "0.4.2",
@@ -252,21 +259,21 @@
     },
     "packages/rest-collections": {
       "name": "@chimpbase/rest-collections",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/runtime": "0.4.2",
       },
     },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "kysely": "^0.28.11",
       },
     },
     "packages/tooling": {
       "name": "@chimpbase/tooling",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/core": "0.4.2",
         "@chimpbase/runtime": "0.4.2",
@@ -276,7 +283,7 @@
     },
     "packages/webhooks": {
       "name": "@chimpbase/webhooks",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@chimpbase/runtime": "0.4.2",
       },
@@ -354,6 +361,8 @@
     "@chimpbase/example-node-intermediate": ["@chimpbase/example-node-intermediate@workspace:examples/node/intermediate"],
 
     "@chimpbase/host": ["@chimpbase/host@workspace:packages/host"],
+
+    "@chimpbase/mesh": ["@chimpbase/mesh@workspace:packages/mesh"],
 
     "@chimpbase/node": ["@chimpbase/node@workspace:packages/node"],
 

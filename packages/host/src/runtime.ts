@@ -41,6 +41,7 @@ import {
   worker as createWorkerEntry,
   type ChimpbaseActionReference,
   type ChimpbaseActionHandler,
+  type ChimpbaseContextExtensionRegistration,
   type ChimpbaseObjectActionHandler,
   type ChimpbaseCronHandler,
   type ChimpbaseInferActionArgs,
@@ -490,6 +491,15 @@ export class ChimpbaseHost<TServer> {
     versions.set(definition.version, definition as ChimpbaseWorkflowDefinition);
     this.registry.workflows.set(definition.name, versions);
     return definition;
+  }
+
+  registerContextExtension(registration: ChimpbaseContextExtensionRegistration<any>): void {
+    const existing = this.registry.contextExtensions.findIndex((entry) => entry.key === registration.key);
+    if (existing >= 0) {
+      this.registry.contextExtensions[existing] = registration;
+    } else {
+      this.registry.contextExtensions.push(registration);
+    }
   }
 
   setHttpHandler(handler: ChimpbaseRouteHandler | null): void {
@@ -1000,6 +1010,7 @@ function createStaticMigrationSource(migrations: readonly ChimpbaseMigration[]):
 function cloneRegistryForWorkerEngine(source: ChimpbaseRegistry): ChimpbaseRegistry {
   return {
     actions: new Map(source.actions),
+    contextExtensions: [...source.contextExtensions],
     crons: new Map(source.crons),
     httpHandler: source.httpHandler,
     onStartHooks: [],

@@ -1,13 +1,13 @@
 {
-  "name": "@chimpbase/rest-collections",
+  "name": "@chimpbase/mesh",
   "version": "0.6.0",
-  "description": "Fetch-first REST plugin for exposing Chimpbase collections without hardcoding routes in the runtime.",
+  "description": "Services and distributed registry plugin for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chimpbase/chimpbase.git",
-    "directory": "packages/rest-collections"
+    "directory": "packages/mesh"
   },
   "homepage": "https://github.com/chimpbase/chimpbase#readme",
   "bugs": {
@@ -15,9 +15,10 @@
   },
   "keywords": [
     "chimpbase",
-    "rest",
-    "collections",
-    "fetch",
+    "mesh",
+    "services",
+    "microservices",
+    "registry",
     "typescript"
   ],
   "files": [
@@ -34,7 +35,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepack": "node ../../scripts/build-package.mjs runtime rest-collections"
+    "prepack": "node ../../scripts/build-package.mjs runtime mesh"
   },
   "dependencies": {
     "@chimpbase/runtime": "0.6.0"

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0 - 2026-04-18
+
+Adds services and distributed registry via the new `@chimpbase/mesh` plugin.
+
+### Added
+
+- added `@chimpbase/mesh` with `service()` sugar (versioning, settings, methods, mixins, lifecycle hooks) and `chimpbaseMesh()` plugin
+- added `ctx.mesh.call(name, args, options)` with strategies (`local-first`, `round-robin`, `random`, `cpu`), retry/timeout/fallback, and user middleware
+- added `ctx.mesh.emit(event, payload, { balanced })` — broadcast via pubsub, balanced via queue worker (exactly-once across the cluster)
+- added distributed registry table `_chimpbase_mesh_nodes` populated on start, refreshed by heartbeat `setInterval`, and cleaned by `__chimpbase.mesh.gc` cron
+- added peer discovery via `PostgresListenEventBus` (announce / leave / heartbeat packets)
+- added HTTP RPC transport at `/__chimpbase/mesh/rpc` with `x-chimpbase-mesh-token` timing-safe authentication
+- added context-extension hook in `@chimpbase/runtime`: `contextExtension(key, { context?, routeEnv? })` + `registerContextExtension` on the registration target so plugins can attach clients to `ChimpbaseContext`
+- added integration test harness `tests/mesh.integration.test.ts` gated by `CHIMPBASE_TEST_PG_URL`
+- added mesh documentation at `docs/mesh.md`
+
 ## 0.4.0 - 2026-04-11
 
 Adds telemetry sink interface and OpenTelemetry integration.
