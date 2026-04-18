@@ -3,6 +3,21 @@ import type { Kysely } from "kysely";
 import type {
   ChimpbaseActionRegistration,
   ChimpbaseActionInvoker,
+  ChimpbaseBlobCopyOptions,
+  ChimpbaseBlobCreateUploadOptions,
+  ChimpbaseBlobDeleteManyResult,
+  ChimpbaseBlobGetOptions,
+  ChimpbaseBlobGetResult,
+  ChimpbaseBlobListOptions,
+  ChimpbaseBlobListResult,
+  ChimpbaseBlobMetadata,
+  ChimpbaseBlobPutOptions,
+  ChimpbaseBlobPutResult,
+  ChimpbaseBlobSignOptions,
+  ChimpbaseBlobUpload,
+  ChimpbaseBlobUploadListOptions,
+  ChimpbaseBlobUploadListResult,
+  ChimpbaseBlobsClient,
   ChimpbaseCollectionFilter,
   ChimpbaseCollectionFindOptions,
   ChimpbaseCollectionPatch,
@@ -246,10 +261,125 @@ export interface ChimpbaseEngineAdapter {
     cronExpression: string,
     nextFireAtMs: number,
   ): Promise<void>;
+  blobPutMetadata(row: ChimpbaseBlobMetaRow): Promise<void>;
+  blobGetMetadata(bucket: string, key: string): Promise<ChimpbaseBlobMetaRow | null>;
+  blobDeleteMetadata(bucket: string, key: string): Promise<boolean>;
+  blobListMetadata(bucket: string, options: ChimpbaseBlobListOptions): Promise<ChimpbaseBlobListMetaResult>;
+  blobInitUpload(row: ChimpbaseBlobUploadRow): Promise<void>;
+  blobGetUpload(uploadId: string): Promise<ChimpbaseBlobUploadRow | null>;
+  blobRecordPart(row: ChimpbaseBlobPartRow): Promise<void>;
+  blobListParts(uploadId: string): Promise<ChimpbaseBlobPartRow[]>;
+  blobFinalizeUpload(uploadId: string, finalMeta: ChimpbaseBlobMetaRow): Promise<void>;
+  blobAbortUpload(uploadId: string): Promise<void>;
+  blobListUploads(bucket: string, options: ChimpbaseBlobUploadListOptions): Promise<ChimpbaseBlobUploadListMetaResult>;
+  blobGcExpiredUploads(nowMs: number): Promise<string[]>;
+}
+
+export interface ChimpbaseBlobMetaRow {
+  bucket: string;
+  key: string;
+  size: number;
+  etag: string;
+  contentType: string;
+  metadata: Record<string, string>;
+  driverRef: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChimpbaseBlobUploadRow {
+  uploadId: string;
+  bucket: string;
+  key: string;
+  contentType: string | null;
+  metadata: Record<string, string>;
+  driverRef: string;
+  createdAtMs: number;
+  expiresAtMs: number;
+}
+
+export interface ChimpbaseBlobPartRow {
+  uploadId: string;
+  partNumber: number;
+  size: number;
+  etag: string;
+  driverRef: string;
+  createdAt: string;
+}
+
+export interface ChimpbaseBlobListMetaResult {
+  entries: ChimpbaseBlobMetaRow[];
+  commonPrefixes: string[];
+  nextCursor: string | null;
+}
+
+export interface ChimpbaseBlobUploadListMetaResult {
+  uploads: ChimpbaseBlobUploadRow[];
+  nextCursor: string | null;
+}
+
+export interface ChimpbaseBlobDriverPutResult {
+  driverRef: string;
+  size: number;
+  sha256: string;
+}
+
+export interface ChimpbaseBlobDriverGetResult {
+  body: ReadableStream<Uint8Array>;
+  size: number;
+}
+
+export interface ChimpbaseBlobDriverRange {
+  start: number;
+  end?: number;
+}
+
+export interface ChimpbaseBlobDriver {
+  ensureBucket(bucket: string): Promise<void>;
+  put(
+    bucket: string,
+    key: string,
+    body: ReadableStream<Uint8Array>,
+    hint?: { sizeHint?: number },
+  ): Promise<ChimpbaseBlobDriverPutResult>;
+  get(
+    bucket: string,
+    key: string,
+    driverRef: string,
+    range?: ChimpbaseBlobDriverRange,
+  ): Promise<ChimpbaseBlobDriverGetResult | null>;
+  delete(bucket: string, key: string, driverRef: string): Promise<void>;
+  copy(
+    src: { bucket: string; key: string; driverRef: string },
+    dst: { bucket: string; key: string },
+  ): Promise<ChimpbaseBlobDriverPutResult>;
+  putPart(
+    uploadId: string,
+    partNumber: number,
+    body: ReadableStream<Uint8Array>,
+  ): Promise<ChimpbaseBlobDriverPutResult>;
+  assemble(
+    uploadId: string,
+    parts: readonly { partNumber: number; driverRef: string }[],
+    finalBucket: string,
+    finalKey: string,
+  ): Promise<ChimpbaseBlobDriverPutResult>;
+  abortUpload(uploadId: string): Promise<void>;
+}
+
+export interface ChimpbaseBlobsEngineConfig {
+  driver: ChimpbaseBlobDriver;
+  buckets: readonly string[];
+  signer?: ChimpbaseBlobSigner;
+}
+
+export interface ChimpbaseBlobSigner {
+  sign(options: ChimpbaseBlobSignOptions): string;
 }
 
 export interface ChimpbaseEngineOptions {
   adapter: ChimpbaseEngineAdapter;
+  blobs?: ChimpbaseBlobsEngineConfig;
   eventBus?: ChimpbaseEventBus;
   platform?: ChimpbasePlatformShim;
   registry: ChimpbaseRegistry;
@@ -271,6 +401,8 @@ export interface ChimpbaseEngineOptions {
 
 export class ChimpbaseEngine {
   private readonly adapter: ChimpbaseEngineAdapter;
+  private readonly blobsConfig: ChimpbaseBlobsEngineConfig | null;
+  private blobsBucketsReady = false;
   private readonly committedEvents: ChimpbaseEventRecord[] = [];
   private readonly eventBus: ChimpbaseEventBus;
   private readonly pendingEvents: ChimpbaseEventRecord[] = [];
@@ -286,6 +418,7 @@ export class ChimpbaseEngine {
 
   constructor(options: ChimpbaseEngineOptions) {
     this.adapter = options.adapter;
+    this.blobsConfig = options.blobs ?? null;
     this.eventBus = options.eventBus ?? new NoopEventBus();
     this.platform = options.platform ?? createDefaultChimpbasePlatformShim();
     this.registry = options.registry;
@@ -797,11 +930,13 @@ export class ChimpbaseEngine {
 
   createRouteEnv(): ChimpbaseRouteEnv {
     const contextMap = new Map<string, unknown>();
+    const blobsClient = this.createBlobsClient();
     return {
       action: async <TArgs extends unknown[] = unknown[], TResult = unknown>(
         nameOrReference: string | ChimpbaseActionRegistration<any, any, any>,
         ...args: TArgs
       ): Promise<TResult> => await this.invokeAction<TResult>(nameOrReference, args),
+      blobs: blobsClient,
       get<T = unknown>(key: string): T | undefined {
         return contextMap.get(key) as T | undefined;
       },
@@ -929,6 +1064,7 @@ export class ChimpbaseEngine {
           options?: ChimpbaseStreamReadOptions,
         ): Promise<ChimpbaseStreamEvent<TPayload>[]> => await this.adapter.streamRead<TPayload>(stream, options),
       },
+      blobs: this.createBlobsClient(),
       queue: {
         enqueue: async <TPayload = unknown>(
           name: string,
@@ -2132,6 +2268,340 @@ export class ChimpbaseEngine {
   private takeCommittedEvents(): ChimpbaseEventRecord[] {
     return this.committedEvents.splice(0);
   }
+
+  private createBlobsClient(): ChimpbaseBlobsClient {
+    const config = this.blobsConfig;
+    const disabled = (): never => {
+      throw new Error(
+        "chimpbase blobs is not configured; pass `blobs: { driver }` to createChimpbase",
+      );
+    };
+    if (!config) {
+      return {
+        put: disabled,
+        get: disabled,
+        head: disabled,
+        delete: disabled,
+        deleteMany: disabled,
+        copy: disabled,
+        list: disabled,
+        createUpload: disabled,
+        resumeUpload: disabled,
+        listUploads: disabled,
+        sign: disabled,
+      };
+    }
+
+    const allowedBuckets = new Set(config.buckets);
+    const assertBucket = (bucket: string): void => {
+      if (allowedBuckets.size > 0 && !allowedBuckets.has(bucket)) {
+        throw new Error(`unknown blob bucket: ${bucket}`);
+      }
+    };
+    const ensureBuckets = async (): Promise<void> => {
+      if (this.blobsBucketsReady) return;
+      for (const bucket of config.buckets) {
+        await config.driver.ensureBucket(bucket);
+      }
+      this.blobsBucketsReady = true;
+    };
+    const adapter = this.adapter;
+    const platform = this.platform;
+    const driver = config.driver;
+
+    const toStream = (body: Uint8Array | ReadableStream<Uint8Array>): ReadableStream<Uint8Array> => {
+      if (body instanceof ReadableStream) return body;
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(body);
+          controller.close();
+        },
+      });
+    };
+    const toMetadata = (row: ChimpbaseBlobMetaRow): ChimpbaseBlobMetadata => ({
+      bucket: row.bucket,
+      key: row.key,
+      size: row.size,
+      etag: row.etag,
+      contentType: row.contentType,
+      metadata: row.metadata,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    });
+    const buildUpload = (row: ChimpbaseBlobUploadRow): ChimpbaseBlobUpload => ({
+      id: row.uploadId,
+      bucket: row.bucket,
+      key: row.key,
+      async writePart(partNumber, body) {
+        if (!Number.isInteger(partNumber) || partNumber < 1) {
+          throw new Error("partNumber must be a positive integer");
+        }
+        const result = await driver.putPart(row.uploadId, partNumber, toStream(body));
+        await adapter.blobRecordPart({
+          uploadId: row.uploadId,
+          partNumber,
+          size: result.size,
+          etag: result.sha256,
+          driverRef: result.driverRef,
+          createdAt: new Date(platform.now()).toISOString(),
+        });
+        return { etag: result.sha256, size: result.size };
+      },
+      async complete() {
+        const parts = (await adapter.blobListParts(row.uploadId)).slice().sort(
+          (a, b) => a.partNumber - b.partNumber,
+        );
+        if (parts.length === 0) {
+          throw new Error(`upload ${row.uploadId} has no parts`);
+        }
+        const assembled = await driver.assemble(
+          row.uploadId,
+          parts.map((part) => ({ partNumber: part.partNumber, driverRef: part.driverRef })),
+          row.bucket,
+          row.key,
+        );
+        const compositeEtag = `${await hashPartEtags(parts.map((p) => p.etag))}-${parts.length}`;
+        const nowIso = new Date(platform.now()).toISOString();
+        const metaRow: ChimpbaseBlobMetaRow = {
+          bucket: row.bucket,
+          key: row.key,
+          size: assembled.size,
+          etag: compositeEtag,
+          contentType: row.contentType ?? "application/octet-stream",
+          metadata: row.metadata,
+          driverRef: assembled.driverRef,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        };
+        await adapter.blobFinalizeUpload(row.uploadId, metaRow);
+        return {
+          bucket: metaRow.bucket,
+          key: metaRow.key,
+          size: metaRow.size,
+          etag: metaRow.etag,
+        };
+      },
+      async abort() {
+        await driver.abortUpload(row.uploadId);
+        await adapter.blobAbortUpload(row.uploadId);
+      },
+      async listParts() {
+        const parts = await adapter.blobListParts(row.uploadId);
+        return parts
+          .slice()
+          .sort((a, b) => a.partNumber - b.partNumber)
+          .map((part) => ({
+            partNumber: part.partNumber,
+            size: part.size,
+            etag: part.etag,
+          }));
+      },
+    });
+
+    return {
+      put: async (bucket, key, body, options) => {
+        assertBucket(bucket);
+        await ensureBuckets();
+        if (options?.ifMatch || options?.ifNoneMatch !== undefined) {
+          const existing = await adapter.blobGetMetadata(bucket, key);
+          if (options.ifNoneMatch === "*" && existing) {
+            throw new ChimpbasePreconditionFailedError(`blob ${bucket}/${key} already exists`);
+          }
+          if (options.ifMatch && (!existing || existing.etag !== options.ifMatch)) {
+            throw new ChimpbasePreconditionFailedError(`blob ${bucket}/${key} etag mismatch`);
+          }
+        }
+        const driverResult = await driver.put(bucket, key, toStream(body));
+        const nowIso = new Date(platform.now()).toISOString();
+        const metadata = options?.metadata ?? {};
+        const contentType = options?.contentType ?? "application/octet-stream";
+        await adapter.blobPutMetadata({
+          bucket,
+          key,
+          size: driverResult.size,
+          etag: driverResult.sha256,
+          contentType,
+          metadata,
+          driverRef: driverResult.driverRef,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+        return { bucket, key, size: driverResult.size, etag: driverResult.sha256 };
+      },
+      get: async (bucket, key, options) => {
+        assertBucket(bucket);
+        const row = await adapter.blobGetMetadata(bucket, key);
+        if (!row) return null;
+        if (options?.ifNoneMatch && options.ifNoneMatch === row.etag) {
+          throw new ChimpbaseNotModifiedError(`blob ${bucket}/${key} not modified`);
+        }
+        const payload = await driver.get(bucket, key, row.driverRef, options?.range);
+        if (!payload) return null;
+        return {
+          ...toMetadata(row),
+          size: payload.size,
+          body: payload.body,
+        };
+      },
+      head: async (bucket, key) => {
+        assertBucket(bucket);
+        const row = await adapter.blobGetMetadata(bucket, key);
+        return row ? toMetadata(row) : null;
+      },
+      delete: async (bucket, key) => {
+        assertBucket(bucket);
+        const row = await adapter.blobGetMetadata(bucket, key);
+        if (!row) return false;
+        await driver.delete(bucket, key, row.driverRef);
+        return await adapter.blobDeleteMetadata(bucket, key);
+      },
+      deleteMany: async (bucket, keys) => {
+        assertBucket(bucket);
+        const deleted: string[] = [];
+        const errors: { key: string; error: string }[] = [];
+        for (const key of keys) {
+          try {
+            const row = await adapter.blobGetMetadata(bucket, key);
+            if (!row) continue;
+            await driver.delete(bucket, key, row.driverRef);
+            await adapter.blobDeleteMetadata(bucket, key);
+            deleted.push(key);
+          } catch (error) {
+            errors.push({
+              key,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        return { deleted, errors };
+      },
+      copy: async (src, dst, options) => {
+        assertBucket(src.bucket);
+        assertBucket(dst.bucket);
+        const row = await adapter.blobGetMetadata(src.bucket, src.key);
+        if (!row) {
+          throw new Error(`source blob ${src.bucket}/${src.key} not found`);
+        }
+        const driverResult = await driver.copy(
+          { bucket: src.bucket, key: src.key, driverRef: row.driverRef },
+          { bucket: dst.bucket, key: dst.key },
+        );
+        const nowIso = new Date(platform.now()).toISOString();
+        await adapter.blobPutMetadata({
+          bucket: dst.bucket,
+          key: dst.key,
+          size: driverResult.size,
+          etag: driverResult.sha256,
+          contentType: options?.contentType ?? row.contentType,
+          metadata: options?.metadata ?? row.metadata,
+          driverRef: driverResult.driverRef,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+        return {
+          bucket: dst.bucket,
+          key: dst.key,
+          size: driverResult.size,
+          etag: driverResult.sha256,
+        };
+      },
+      list: async (bucket, options) => {
+        assertBucket(bucket);
+        const result = await adapter.blobListMetadata(bucket, options ?? {});
+        return {
+          entries: result.entries.map((row) => ({
+            key: row.key,
+            size: row.size,
+            etag: row.etag,
+            contentType: row.contentType,
+            updatedAt: row.updatedAt,
+          })),
+          commonPrefixes: result.commonPrefixes,
+          nextCursor: result.nextCursor,
+        };
+      },
+      createUpload: async (bucket, key, options) => {
+        assertBucket(bucket);
+        await ensureBuckets();
+        const uploadId = platform.randomUUID();
+        const createdMs = platform.now();
+        const ttlMs = options?.ttlMs ?? 24 * 60 * 60 * 1000;
+        const row: ChimpbaseBlobUploadRow = {
+          uploadId,
+          bucket,
+          key,
+          contentType: options?.contentType ?? null,
+          metadata: options?.metadata ?? {},
+          driverRef: uploadId,
+          createdAtMs: createdMs,
+          expiresAtMs: createdMs + ttlMs,
+        };
+        await adapter.blobInitUpload(row);
+        return buildUpload(row);
+      },
+      resumeUpload: async (uploadId) => {
+        const row = await adapter.blobGetUpload(uploadId);
+        if (!row) {
+          throw new Error(`upload ${uploadId} not found`);
+        }
+        return buildUpload(row);
+      },
+      listUploads: async (bucket, options) => {
+        assertBucket(bucket);
+        const result = await adapter.blobListUploads(bucket, options ?? {});
+        return {
+          uploads: result.uploads.map((row) => ({
+            id: row.uploadId,
+            bucket: row.bucket,
+            key: row.key,
+            createdAt: new Date(row.createdAtMs).toISOString(),
+            expiresAt: new Date(row.expiresAtMs).toISOString(),
+          })),
+          nextCursor: result.nextCursor,
+        };
+      },
+      sign: (options) => {
+        assertBucket(options.bucket);
+        if (!config.signer) {
+          throw new Error("blob signing secret not configured");
+        }
+        return config.signer.sign(options);
+      },
+    };
+  }
+
+  getBlobsEngineConfig(): ChimpbaseBlobsEngineConfig | null {
+    return this.blobsConfig;
+  }
+
+  getBlobsAdapter(): ChimpbaseEngineAdapter {
+    return this.adapter;
+  }
+}
+
+export class ChimpbasePreconditionFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChimpbasePreconditionFailedError";
+  }
+}
+
+export class ChimpbaseNotModifiedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChimpbaseNotModifiedError";
+  }
+}
+
+async function hashPartEtags(etags: readonly string[]): Promise<string> {
+  const bytes = new TextEncoder().encode(etags.join(""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const view = new Uint8Array(digest);
+  let out = "";
+  for (const byte of view) {
+    out += byte.toString(16).padStart(2, "0");
+  }
+  return out;
 }
 
 function normalizeActionArgs(args: unknown): unknown[] {

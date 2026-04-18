@@ -39,6 +39,7 @@ export default defineConfig({
           { text: "Database", link: "/database" },
           { text: "Collections", link: "/collections" },
           { text: "KV Store", link: "/kv" },
+          { text: "Blobs", link: "/blobs" },
           { text: "Streams", link: "/streams" },
           { text: "Telemetry", link: "/telemetry" },
           { text: "Plugins", link: "/plugins" },

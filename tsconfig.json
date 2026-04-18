@@ -24,6 +24,7 @@
       "@chimpbase/tooling/*": ["./packages/tooling/src/*"],
       "@chimpbase/pact": ["./packages/pact/src/index.ts"],
       "@chimpbase/auth": ["./packages/auth/src/index.ts"],
+      "@chimpbase/blobs": ["./packages/blobs/src/index.ts"],
       "@chimpbase/webhooks": ["./packages/webhooks/src/index.ts"],
       "@chimpbase/otel": ["./packages/otel/src/index.ts"]
     }
@@ -41,6 +42,7 @@
     "packages/runtime/**/*.ts",
     "packages/pact/**/*.ts",
     "packages/auth/**/*.ts",
+    "packages/blobs/**/*.ts",
     "packages/webhooks/**/*.ts",
     "packages/otel/**/*.ts",
     "examples/**/*.ts"

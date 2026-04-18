@@ -44,6 +44,7 @@
       "name": "@chimpbase/example-bun-advanced",
       "dependencies": {
         "@chimpbase/auth": "workspace:*",
+        "@chimpbase/blobs": "workspace:*",
         "@chimpbase/bun": "workspace:*",
         "@chimpbase/core": "workspace:*",
         "@chimpbase/otel": "workspace:*",
@@ -123,23 +124,31 @@
     },
     "packages/auth": {
       "name": "@chimpbase/auth",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
-        "@chimpbase/runtime": "0.4.1",
+        "@chimpbase/runtime": "0.4.2",
+      },
+    },
+    "packages/blobs": {
+      "name": "@chimpbase/blobs",
+      "version": "0.4.2",
+      "dependencies": {
+        "@chimpbase/core": "0.4.2",
+        "@chimpbase/runtime": "0.4.2",
       },
     },
     "packages/bun": {
       "name": "@chimpbase/bun",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "bin": {
         "chimpbase": "./src/cli.ts",
       },
       "dependencies": {
-        "@chimpbase/core": "0.4.1",
-        "@chimpbase/host": "0.4.1",
-        "@chimpbase/postgres": "0.4.1",
-        "@chimpbase/runtime": "0.4.1",
-        "@chimpbase/tooling": "0.4.1",
+        "@chimpbase/core": "0.4.2",
+        "@chimpbase/host": "0.4.2",
+        "@chimpbase/postgres": "0.4.2",
+        "@chimpbase/runtime": "0.4.2",
+        "@chimpbase/tooling": "0.4.2",
         "kysely": "^0.28.11",
       },
       "devDependencies": {
@@ -150,15 +159,15 @@
     },
     "packages/core": {
       "name": "@chimpbase/core",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
-        "@chimpbase/runtime": "0.4.1",
+        "@chimpbase/runtime": "0.4.2",
         "kysely": "^0.28.11",
       },
     },
     "packages/deno": {
       "name": "@chimpbase/deno",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "@chimpbase/core": "0.1.24",
         "@chimpbase/host": "0.1.24",
@@ -173,18 +182,18 @@
     },
     "packages/host": {
       "name": "@chimpbase/host",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
-        "@chimpbase/core": "0.4.1",
-        "@chimpbase/postgres": "0.4.1",
-        "@chimpbase/runtime": "0.4.1",
-        "@chimpbase/tooling": "0.4.1",
+        "@chimpbase/core": "0.4.2",
+        "@chimpbase/postgres": "0.4.2",
+        "@chimpbase/runtime": "0.4.2",
+        "@chimpbase/tooling": "0.4.2",
         "kysely": "^0.28.11",
       },
     },
     "packages/node": {
       "name": "@chimpbase/node",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "bin": {
         "chimpbase-node": "./dist/src/cli.js",
       },
@@ -203,9 +212,9 @@
     },
     "packages/otel": {
       "name": "@chimpbase/otel",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
-        "@chimpbase/runtime": "0.4.1",
+        "@chimpbase/runtime": "0.4.2",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/api-logs": "^0.200.0",
         "@opentelemetry/context-async-hooks": "^2.0.0",
@@ -221,7 +230,7 @@
     },
     "packages/pact": {
       "name": "@chimpbase/pact",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "@chimpbase/core": "0.4.0",
         "@chimpbase/runtime": "0.4.0",
@@ -229,10 +238,10 @@
     },
     "packages/postgres": {
       "name": "@chimpbase/postgres",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
-        "@chimpbase/core": "0.4.1",
-        "@chimpbase/runtime": "0.4.1",
+        "@chimpbase/core": "0.4.2",
+        "@chimpbase/runtime": "0.4.2",
         "kysely": "^0.28.11",
         "pg": "^8.16.3",
       },
@@ -243,33 +252,33 @@
     },
     "packages/rest-collections": {
       "name": "@chimpbase/rest-collections",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
-        "@chimpbase/runtime": "0.4.1",
+        "@chimpbase/runtime": "0.4.2",
       },
     },
     "packages/runtime": {
       "name": "@chimpbase/runtime",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "kysely": "^0.28.11",
       },
     },
     "packages/tooling": {
       "name": "@chimpbase/tooling",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
-        "@chimpbase/core": "0.4.1",
-        "@chimpbase/runtime": "0.4.1",
+        "@chimpbase/core": "0.4.2",
+        "@chimpbase/runtime": "0.4.2",
         "kysely": "^0.28.11",
         "pg": "^8.16.3",
       },
     },
     "packages/webhooks": {
       "name": "@chimpbase/webhooks",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
-        "@chimpbase/runtime": "0.4.1",
+        "@chimpbase/runtime": "0.4.2",
       },
     },
   },
@@ -321,6 +330,8 @@
     "@borewit/text-codec": ["@borewit/text-codec@0.2.1", "", {}, "sha512-k7vvKPbf7J2fZ5klGRD9AeKfUvojuZIQ3BT5u7Jfv+puwXkUBUT5PVyMDfJZpy30CBDXGMgw7fguK/lpOMBvgw=="],
 
     "@chimpbase/auth": ["@chimpbase/auth@workspace:packages/auth"],
+
+    "@chimpbase/blobs": ["@chimpbase/blobs@workspace:packages/blobs"],
 
     "@chimpbase/bun": ["@chimpbase/bun@workspace:packages/bun"],
 

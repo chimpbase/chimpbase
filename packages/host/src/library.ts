@@ -5,6 +5,8 @@ import {
   normalizeProjectConfig,
   type ChimpbaseAppDefinition,
   type ChimpbaseAppDefinitionInput,
+  type ChimpbaseBlobDriver,
+  type ChimpbaseBlobSigner,
   type ChimpbaseSecretsSource,
 } from "@chimpbase/core";
 import type { ChimpbaseTelemetrySink } from "@chimpbase/runtime";
@@ -40,7 +42,14 @@ export interface StartedChimpbaseProject<THost, TServer> {
   stop(): Promise<void>;
 }
 
+export interface CreateChimpbaseBlobsOptions {
+  driver: ChimpbaseBlobDriver;
+  buckets: readonly string[];
+  signer?: ChimpbaseBlobSigner;
+}
+
 export interface CreateChimpbaseRuntimeOptions {
+  blobs?: CreateChimpbaseBlobsOptions;
   debug?: boolean;
   migrationsDir?: string;
   migrationsSql?: string[];
@@ -287,6 +296,7 @@ export function createChimpbaseRuntimeLibrary<
 
     return await createRuntimeHost(HostClass, runtime, {
       app,
+      blobs: options.blobs,
       config,
       debug: inferDebugEnabled(runtime.env, options.debug),
       migrationsDir: inferMigrationsDir(projectDir, options.migrationsDir ?? runtime.env.get("CHIMPBASE_MIGRATIONS_DIR"), options),

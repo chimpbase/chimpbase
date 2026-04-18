@@ -434,6 +434,148 @@ export interface ChimpbaseStreamClient {
   ): Promise<ChimpbaseStreamEvent<TPayload>[]>;
 }
 
+export interface ChimpbaseBlobMetadata {
+  bucket: string;
+  key: string;
+  size: number;
+  etag: string;
+  contentType: string;
+  metadata: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChimpbaseBlobPutOptions {
+  contentType?: string;
+  metadata?: Record<string, string>;
+  ifMatch?: string;
+  ifNoneMatch?: string;
+}
+
+export interface ChimpbaseBlobPutResult {
+  bucket: string;
+  key: string;
+  size: number;
+  etag: string;
+}
+
+export interface ChimpbaseBlobRange {
+  start: number;
+  end?: number;
+}
+
+export interface ChimpbaseBlobGetOptions {
+  range?: ChimpbaseBlobRange;
+  ifNoneMatch?: string;
+}
+
+export interface ChimpbaseBlobGetResult extends ChimpbaseBlobMetadata {
+  body: ReadableStream<Uint8Array>;
+}
+
+export interface ChimpbaseBlobDeleteManyResult {
+  deleted: string[];
+  errors: { key: string; error: string }[];
+}
+
+export interface ChimpbaseBlobCopyOptions {
+  metadata?: Record<string, string>;
+  contentType?: string;
+}
+
+export interface ChimpbaseBlobListOptions {
+  prefix?: string;
+  delimiter?: string;
+  cursor?: string | null;
+  limit?: number;
+}
+
+export interface ChimpbaseBlobListEntry {
+  key: string;
+  size: number;
+  etag: string;
+  contentType: string;
+  updatedAt: string;
+}
+
+export interface ChimpbaseBlobListResult {
+  entries: ChimpbaseBlobListEntry[];
+  commonPrefixes: string[];
+  nextCursor: string | null;
+}
+
+export interface ChimpbaseBlobCreateUploadOptions {
+  contentType?: string;
+  metadata?: Record<string, string>;
+  ttlMs?: number;
+}
+
+export interface ChimpbaseBlobUploadSummary {
+  id: string;
+  bucket: string;
+  key: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ChimpbaseBlobUploadListOptions {
+  prefix?: string;
+  cursor?: string | null;
+  limit?: number;
+}
+
+export interface ChimpbaseBlobUploadListResult {
+  uploads: ChimpbaseBlobUploadSummary[];
+  nextCursor: string | null;
+}
+
+export interface ChimpbaseBlobUpload {
+  readonly id: string;
+  readonly bucket: string;
+  readonly key: string;
+  writePart(partNumber: number, body: Uint8Array | ReadableStream<Uint8Array>): Promise<{ etag: string; size: number }>;
+  complete(): Promise<ChimpbaseBlobPutResult>;
+  abort(): Promise<void>;
+  listParts(): Promise<{ partNumber: number; size: number; etag: string }[]>;
+}
+
+export interface ChimpbaseBlobSignOptions {
+  bucket: string;
+  key: string;
+  op: "get" | "put";
+  ttlSec: number;
+  contentType?: string;
+  sizeMax?: number;
+  responseContentDisposition?: string;
+}
+
+export interface ChimpbaseBlobsClient {
+  put(
+    bucket: string,
+    key: string,
+    body: Uint8Array | ReadableStream<Uint8Array>,
+    options?: ChimpbaseBlobPutOptions,
+  ): Promise<ChimpbaseBlobPutResult>;
+  get(bucket: string, key: string, options?: ChimpbaseBlobGetOptions): Promise<ChimpbaseBlobGetResult | null>;
+  head(bucket: string, key: string): Promise<ChimpbaseBlobMetadata | null>;
+  delete(bucket: string, key: string): Promise<boolean>;
+  deleteMany(bucket: string, keys: readonly string[]): Promise<ChimpbaseBlobDeleteManyResult>;
+  copy(
+    src: { bucket: string; key: string },
+    dst: { bucket: string; key: string },
+    options?: ChimpbaseBlobCopyOptions,
+  ): Promise<ChimpbaseBlobPutResult>;
+  list(bucket: string, options?: ChimpbaseBlobListOptions): Promise<ChimpbaseBlobListResult>;
+  createUpload(
+    bucket: string,
+    key: string,
+    options?: ChimpbaseBlobCreateUploadOptions,
+  ): Promise<ChimpbaseBlobUpload>;
+  resumeUpload(uploadId: string): Promise<ChimpbaseBlobUpload>;
+  listUploads(bucket: string, options?: ChimpbaseBlobUploadListOptions): Promise<ChimpbaseBlobUploadListResult>;
+  sign(options: ChimpbaseBlobSignOptions): string;
+}
+
 export interface ChimpbasePubSubClient {
   publish<TPayload = unknown>(topic: string, payload: TPayload): void;
 }
@@ -460,6 +602,7 @@ export interface ChimpbaseContext<TActions extends ChimpbaseActionMap = Chimpbas
   kv: ChimpbaseKvClient;
   collection: ChimpbaseCollectionClient;
   stream: ChimpbaseStreamClient;
+  blobs: ChimpbaseBlobsClient;
   queue: ChimpbaseQueueClient;
   workflow: ChimpbaseWorkflowClient;
   log: ChimpbaseLogger;
@@ -500,6 +643,7 @@ export interface ChimpbaseRouteEnv<TActions extends ChimpbaseActionMap = Chimpba
     name: string,
     ...args: TArgs
   ): Promise<TResult>;
+  blobs: ChimpbaseBlobsClient;
   get<T = unknown>(key: string): T | undefined;
   set(key: string, value: unknown): void;
 }

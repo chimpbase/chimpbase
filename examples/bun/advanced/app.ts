@@ -1,5 +1,6 @@
 import { normalizeProjectConfig } from "@chimpbase/core";
 import { createChimpbase } from "@chimpbase/bun";
+import { chimpbaseBlobs, fsBlobDriver, memoryBlobDriver } from "@chimpbase/blobs";
 import { createOtelSink } from "@chimpbase/otel";
 import { loadLocalSecretStore } from "@chimpbase/tooling/secrets";
 
@@ -26,11 +27,24 @@ export async function createAdvancedApp() {
       ]
     : [];
 
+  const blobsRoot = process.env.ATTACHMENTS_ROOT;
+  const driver = blobsRoot ? fsBlobDriver({ root: blobsRoot }) : memoryBlobDriver();
+  const blobsPlugin = chimpbaseBlobs({
+    secret: process.env.BLOBS_SIGNING_SECRET ?? "advanced-example-secret",
+    baseUrl: process.env.BLOBS_BASE_URL ?? "http://127.0.0.1:3000",
+  });
+
   return await createChimpbase({
     ...app,
     projectDir: import.meta.dir,
     secrets,
     sinks,
+    blobs: {
+      driver,
+      buckets: ["attachments"],
+      signer: blobsPlugin.signer,
+    },
+    registrations: [...(app.registrations ?? []), ...blobsPlugin.registrations],
   });
 }
 

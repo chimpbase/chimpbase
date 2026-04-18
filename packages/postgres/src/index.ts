@@ -2,6 +2,11 @@ import type { CompiledQuery, Kysely, QueryResult } from "kysely";
 import { Pool, type PoolClient } from "pg";
 
 import type {
+  ChimpbaseBlobListMetaResult,
+  ChimpbaseBlobMetaRow,
+  ChimpbaseBlobPartRow,
+  ChimpbaseBlobUploadListMetaResult,
+  ChimpbaseBlobUploadRow,
   ChimpbaseEngineAdapter,
   ChimpbaseEventRecord,
   ChimpbasePlatformShim,
@@ -9,6 +14,8 @@ import type {
   ChimpbaseQueueJobRecord,
 } from "@chimpbase/core";
 import type {
+  ChimpbaseBlobListOptions,
+  ChimpbaseBlobUploadListOptions,
   ChimpbaseCollectionFilter,
   ChimpbaseCollectionFindOptions,
   ChimpbaseCollectionPatch,
@@ -239,6 +246,73 @@ export async function ensurePostgresInternalTables(pool: Pool): Promise<void> {
     `
       CREATE INDEX IF NOT EXISTS idx_chimpbase_workflow_signals_pending
       ON _chimpbase_workflow_signals(workflow_id, signal_name, consumed_at, id)
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE TABLE IF NOT EXISTS _chimpbase_blobs (
+        bucket TEXT NOT NULL,
+        key TEXT NOT NULL,
+        size BIGINT NOT NULL,
+        etag TEXT NOT NULL,
+        content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        driver_ref TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (bucket, key)
+      )
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_blobs_bucket_prefix
+      ON _chimpbase_blobs (bucket, key text_pattern_ops)
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE TABLE IF NOT EXISTS _chimpbase_blob_uploads (
+        upload_id TEXT PRIMARY KEY,
+        bucket TEXT NOT NULL,
+        key TEXT NOT NULL,
+        content_type TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        driver_ref TEXT NOT NULL,
+        created_at_ms BIGINT NOT NULL,
+        expires_at_ms BIGINT NOT NULL
+      )
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_blob_uploads_expires
+      ON _chimpbase_blob_uploads (expires_at_ms)
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE INDEX IF NOT EXISTS idx_chimpbase_blob_uploads_bucket_key
+      ON _chimpbase_blob_uploads (bucket, key)
+    `,
+  );
+
+  await pool.query(
+    `
+      CREATE TABLE IF NOT EXISTS _chimpbase_blob_upload_parts (
+        upload_id TEXT NOT NULL REFERENCES _chimpbase_blob_uploads(upload_id) ON DELETE CASCADE,
+        part_number INTEGER NOT NULL,
+        size BIGINT NOT NULL,
+        etag TEXT NOT NULL,
+        driver_ref TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (upload_id, part_number)
+      )
     `,
   );
 }
@@ -723,6 +797,359 @@ export function createPostgresEngineAdapter(
         [scheduleName, cronExpression, nextFireAtMs],
       );
     },
+    async blobPutMetadata(row: ChimpbaseBlobMetaRow): Promise<void> {
+      await queryable().query(
+        `
+          INSERT INTO _chimpbase_blobs (
+            bucket, key, size, etag, content_type, metadata, driver_ref, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::timestamptz, $9::timestamptz)
+          ON CONFLICT(bucket, key) DO UPDATE SET
+            size = excluded.size,
+            etag = excluded.etag,
+            content_type = excluded.content_type,
+            metadata = excluded.metadata,
+            driver_ref = excluded.driver_ref,
+            updated_at = excluded.updated_at
+        `,
+        [
+          row.bucket,
+          row.key,
+          row.size,
+          row.etag,
+          row.contentType,
+          JSON.stringify(row.metadata),
+          row.driverRef,
+          row.createdAt,
+          row.updatedAt,
+        ],
+      );
+    },
+    async blobGetMetadata(bucket: string, key: string): Promise<ChimpbaseBlobMetaRow | null> {
+      const result = await queryable().query<{
+        bucket: string;
+        key: string;
+        size: string;
+        etag: string;
+        content_type: string;
+        metadata: string;
+        driver_ref: string;
+        created_at: string;
+        updated_at: string;
+      }>(
+        `
+          SELECT bucket, key, size::text AS size, etag, content_type,
+                 metadata::text AS metadata, driver_ref,
+                 created_at::text AS created_at, updated_at::text AS updated_at
+          FROM _chimpbase_blobs
+          WHERE bucket = $1 AND key = $2
+          LIMIT 1
+        `,
+        [bucket, key],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        bucket: row.bucket,
+        key: row.key,
+        size: Number(row.size),
+        etag: row.etag,
+        contentType: row.content_type,
+        metadata: JSON.parse(row.metadata) as Record<string, string>,
+        driverRef: row.driver_ref,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    },
+    async blobDeleteMetadata(bucket: string, key: string): Promise<boolean> {
+      const result = await queryable().query(
+        "DELETE FROM _chimpbase_blobs WHERE bucket = $1 AND key = $2",
+        [bucket, key],
+      );
+      return (result.rowCount ?? 0) > 0;
+    },
+    async blobListMetadata(
+      bucket: string,
+      options: ChimpbaseBlobListOptions,
+    ): Promise<ChimpbaseBlobListMetaResult> {
+      const prefix = options.prefix ?? "";
+      const delimiter = options.delimiter ?? null;
+      const limit = Math.min(Math.max(options.limit ?? 1000, 1), 1000);
+      const cursor = options.cursor ?? "";
+      const result = await queryable().query<{
+        bucket: string;
+        key: string;
+        size: string;
+        etag: string;
+        content_type: string;
+        metadata: string;
+        driver_ref: string;
+        created_at: string;
+        updated_at: string;
+      }>(
+        `
+          SELECT bucket, key, size::text AS size, etag, content_type,
+                 metadata::text AS metadata, driver_ref,
+                 created_at::text AS created_at, updated_at::text AS updated_at
+          FROM _chimpbase_blobs
+          WHERE bucket = $1
+            AND key LIKE $2
+            AND key > $3
+          ORDER BY key ASC
+          LIMIT $4
+        `,
+        [bucket, `${prefix}%`, cursor, limit + 1],
+      );
+      return sliceBlobList(result.rows.map((row) => ({
+        bucket: row.bucket,
+        key: row.key,
+        size: Number(row.size),
+        etag: row.etag,
+        contentType: row.content_type,
+        metadata: JSON.parse(row.metadata) as Record<string, string>,
+        driverRef: row.driver_ref,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })), prefix, delimiter, limit);
+    },
+    async blobInitUpload(row: ChimpbaseBlobUploadRow): Promise<void> {
+      await queryable().query(
+        `
+          INSERT INTO _chimpbase_blob_uploads (
+            upload_id, bucket, key, content_type, metadata, driver_ref, created_at_ms, expires_at_ms
+          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
+        `,
+        [
+          row.uploadId,
+          row.bucket,
+          row.key,
+          row.contentType,
+          JSON.stringify(row.metadata),
+          row.driverRef,
+          row.createdAtMs,
+          row.expiresAtMs,
+        ],
+      );
+    },
+    async blobGetUpload(uploadId: string): Promise<ChimpbaseBlobUploadRow | null> {
+      const result = await queryable().query<{
+        upload_id: string;
+        bucket: string;
+        key: string;
+        content_type: string | null;
+        metadata: string;
+        driver_ref: string;
+        created_at_ms: string;
+        expires_at_ms: string;
+      }>(
+        `
+          SELECT upload_id, bucket, key, content_type,
+                 metadata::text AS metadata, driver_ref,
+                 created_at_ms::text AS created_at_ms,
+                 expires_at_ms::text AS expires_at_ms
+          FROM _chimpbase_blob_uploads
+          WHERE upload_id = $1
+          LIMIT 1
+        `,
+        [uploadId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        uploadId: row.upload_id,
+        bucket: row.bucket,
+        key: row.key,
+        contentType: row.content_type,
+        metadata: JSON.parse(row.metadata) as Record<string, string>,
+        driverRef: row.driver_ref,
+        createdAtMs: Number(row.created_at_ms),
+        expiresAtMs: Number(row.expires_at_ms),
+      };
+    },
+    async blobRecordPart(row: ChimpbaseBlobPartRow): Promise<void> {
+      await queryable().query(
+        `
+          INSERT INTO _chimpbase_blob_upload_parts (
+            upload_id, part_number, size, etag, driver_ref, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6::timestamptz)
+          ON CONFLICT(upload_id, part_number) DO UPDATE SET
+            size = excluded.size,
+            etag = excluded.etag,
+            driver_ref = excluded.driver_ref,
+            created_at = excluded.created_at
+        `,
+        [row.uploadId, row.partNumber, row.size, row.etag, row.driverRef, row.createdAt],
+      );
+    },
+    async blobListParts(uploadId: string): Promise<ChimpbaseBlobPartRow[]> {
+      const result = await queryable().query<{
+        upload_id: string;
+        part_number: number;
+        size: string;
+        etag: string;
+        driver_ref: string;
+        created_at: string;
+      }>(
+        `
+          SELECT upload_id, part_number, size::text AS size, etag, driver_ref, created_at::text AS created_at
+          FROM _chimpbase_blob_upload_parts
+          WHERE upload_id = $1
+          ORDER BY part_number ASC
+        `,
+        [uploadId],
+      );
+      return result.rows.map((row) => ({
+        uploadId: row.upload_id,
+        partNumber: row.part_number,
+        size: Number(row.size),
+        etag: row.etag,
+        driverRef: row.driver_ref,
+        createdAt: row.created_at,
+      }));
+    },
+    async blobFinalizeUpload(
+      uploadId: string,
+      finalMeta: ChimpbaseBlobMetaRow,
+    ): Promise<void> {
+      const client = transactionClient ?? await pool.connect();
+      const ownsClient = !transactionClient;
+      try {
+        if (ownsClient) await client.query("BEGIN");
+        await client.query(
+          `
+            INSERT INTO _chimpbase_blobs (
+              bucket, key, size, etag, content_type, metadata, driver_ref, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::timestamptz, $9::timestamptz)
+            ON CONFLICT(bucket, key) DO UPDATE SET
+              size = excluded.size,
+              etag = excluded.etag,
+              content_type = excluded.content_type,
+              metadata = excluded.metadata,
+              driver_ref = excluded.driver_ref,
+              updated_at = excluded.updated_at
+          `,
+          [
+            finalMeta.bucket,
+            finalMeta.key,
+            finalMeta.size,
+            finalMeta.etag,
+            finalMeta.contentType,
+            JSON.stringify(finalMeta.metadata),
+            finalMeta.driverRef,
+            finalMeta.createdAt,
+            finalMeta.updatedAt,
+          ],
+        );
+        await client.query(
+          "DELETE FROM _chimpbase_blob_uploads WHERE upload_id = $1",
+          [uploadId],
+        );
+        if (ownsClient) await client.query("COMMIT");
+      } catch (error) {
+        if (ownsClient) {
+          try { await client.query("ROLLBACK"); } catch {}
+        }
+        throw error;
+      } finally {
+        if (ownsClient) client.release();
+      }
+    },
+    async blobAbortUpload(uploadId: string): Promise<void> {
+      await queryable().query(
+        "DELETE FROM _chimpbase_blob_uploads WHERE upload_id = $1",
+        [uploadId],
+      );
+    },
+    async blobListUploads(
+      bucket: string,
+      options: ChimpbaseBlobUploadListOptions,
+    ): Promise<ChimpbaseBlobUploadListMetaResult> {
+      const prefix = options.prefix ?? "";
+      const cursor = options.cursor ?? "";
+      const limit = Math.min(Math.max(options.limit ?? 100, 1), 1000);
+      const result = await queryable().query<{
+        upload_id: string;
+        bucket: string;
+        key: string;
+        content_type: string | null;
+        metadata: string;
+        driver_ref: string;
+        created_at_ms: string;
+        expires_at_ms: string;
+      }>(
+        `
+          SELECT upload_id, bucket, key, content_type,
+                 metadata::text AS metadata, driver_ref,
+                 created_at_ms::text AS created_at_ms,
+                 expires_at_ms::text AS expires_at_ms
+          FROM _chimpbase_blob_uploads
+          WHERE bucket = $1 AND key LIKE $2 AND upload_id > $3
+          ORDER BY upload_id ASC
+          LIMIT $4
+        `,
+        [bucket, `${prefix}%`, cursor, limit + 1],
+      );
+      const rows = result.rows.map((row) => ({
+        uploadId: row.upload_id,
+        bucket: row.bucket,
+        key: row.key,
+        contentType: row.content_type,
+        metadata: JSON.parse(row.metadata) as Record<string, string>,
+        driverRef: row.driver_ref,
+        createdAtMs: Number(row.created_at_ms),
+        expiresAtMs: Number(row.expires_at_ms),
+      }));
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      return {
+        uploads: page,
+        nextCursor: hasMore ? page[page.length - 1].uploadId : null,
+      };
+    },
+    async blobGcExpiredUploads(nowMs: number): Promise<string[]> {
+      const result = await queryable().query<{ upload_id: string }>(
+        `
+          DELETE FROM _chimpbase_blob_uploads
+          WHERE expires_at_ms <= $1
+          RETURNING upload_id
+        `,
+        [nowMs],
+      );
+      return result.rows.map((row) => row.upload_id);
+    },
+  };
+}
+
+function sliceBlobList(
+  rows: ChimpbaseBlobMetaRow[],
+  prefix: string,
+  delimiter: string | null,
+  limit: number,
+): ChimpbaseBlobListMetaResult {
+  const entries: ChimpbaseBlobMetaRow[] = [];
+  const commonPrefixes = new Set<string>();
+  let nextCursor: string | null = null;
+  for (const row of rows) {
+    if (entries.length + commonPrefixes.size >= limit) {
+      nextCursor = entries.length > 0 ? entries[entries.length - 1].key : row.key;
+      break;
+    }
+    if (delimiter) {
+      const after = row.key.slice(prefix.length);
+      const idx = after.indexOf(delimiter);
+      if (idx >= 0) {
+        commonPrefixes.add(prefix + after.slice(0, idx + delimiter.length));
+        continue;
+      }
+    }
+    entries.push(row);
+  }
+  if (!nextCursor && rows.length > limit) {
+    nextCursor = rows[limit - 1]?.key ?? null;
+  }
+  return {
+    entries,
+    commonPrefixes: [...commonPrefixes].sort(),
+    nextCursor,
   };
 }
 

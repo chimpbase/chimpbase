@@ -4,6 +4,13 @@ import { chimpbaseWebhooks } from "@chimpbase/webhooks";
 import { restCollections } from "@chimpbase/rest-collections";
 import { cron, subscription, worker } from "@chimpbase/runtime";
 
+import {
+  backupAttachments,
+  downloadAttachment,
+  listAttachments,
+  uploadAttachment,
+} from "./src/modules/attachments/attachment.actions.ts";
+
 import migrations from "./chimpbase.migrations.ts";
 import { orderApiApp } from "./src/http/app.ts";
 import {
@@ -107,5 +114,10 @@ export default {
     worker("order.completed.notify.dlq", captureOrderCompletedDlq, { dlq: false }),
 
     cron("orders.backlog.snapshot", "*/15 * * * *", captureOrderBacklogSnapshot),
+
+    uploadAttachment,
+    downloadAttachment,
+    listAttachments,
+    backupAttachments,
   ],
 } satisfies ChimpbaseAppDefinitionInput;

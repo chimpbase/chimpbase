@@ -1,13 +1,13 @@
 {
-  "name": "@chimpbase/pact",
+  "name": "@chimpbase/blobs",
   "version": "0.5.0",
-  "description": "Contract testing for Chimpbase using consumer-driven pacts.",
+  "description": "Blob storage primitive and drivers for Chimpbase (filesystem + in-memory).",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chimpbase/chimpbase.git",
-    "directory": "packages/pact"
+    "directory": "packages/blobs"
   },
   "homepage": "https://github.com/chimpbase/chimpbase#readme",
   "bugs": {
@@ -15,9 +15,9 @@
   },
   "keywords": [
     "chimpbase",
-    "pact",
-    "contract-testing",
-    "consumer-driven",
+    "blobs",
+    "object-storage",
+    "filesystem",
     "typescript"
   ],
   "files": [
@@ -34,7 +34,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepack": "node ../../scripts/build-package.mjs pact"
+    "prepack": "node ../../scripts/build-package.mjs blobs"
   },
   "dependencies": {
     "@chimpbase/core": "0.5.0",

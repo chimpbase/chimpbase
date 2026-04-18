@@ -12,6 +12,10 @@ const packageConfigs = {
     dir: "packages/auth",
     types: ["node"],
   },
+  blobs: {
+    dir: "packages/blobs",
+    types: ["node"],
+  },
   bun: {
     dir: "packages/bun",
     types: ["bun-types", "node"],

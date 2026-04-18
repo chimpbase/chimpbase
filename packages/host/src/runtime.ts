@@ -4,6 +4,9 @@ import {
   ChimpbaseEngine,
   createDefaultChimpbasePlatformShim,
   listChimpbaseMigrationsForEngine,
+  type ChimpbaseBlobDriver,
+  type ChimpbaseBlobSigner,
+  type ChimpbaseBlobsEngineConfig,
   type ChimpbaseDrainOptions,
   type ChimpbaseDrainResult,
   type ChimpbaseEventBus,
@@ -138,6 +141,11 @@ export interface ChimpbaseRuntimeShim<TServer> {
 
 export interface CreateHostOptions {
   app?: ChimpbaseAppDefinition;
+  blobs?: {
+    driver: ChimpbaseBlobDriver;
+    buckets: readonly string[];
+    signer?: ChimpbaseBlobSigner;
+  };
   config: ChimpbaseProjectConfig;
   debug?: boolean;
   migrations?: ChimpbaseMigrationsDefinition;
@@ -826,8 +834,12 @@ export async function createRuntimeHost<TServer, THost extends ChimpbaseHost<TSe
     secretsDirDefault: runtime.env.get("CHIMPBASE_SECRETS_DIR") ?? "/run/secrets",
   });
 
+  const blobsEngineConfig: ChimpbaseBlobsEngineConfig | undefined = options.blobs
+    ? { driver: options.blobs.driver, buckets: options.blobs.buckets, signer: options.blobs.signer }
+    : undefined;
   const createPrimaryEngine = () => new ChimpbaseEngine({
     adapter: storageResources.createAdapter(),
+    blobs: blobsEngineConfig,
     eventBus: storageResources.eventBus,
     platform,
     registry,
@@ -844,6 +856,7 @@ export async function createRuntimeHost<TServer, THost extends ChimpbaseHost<TSe
   });
   const createWorkerEngine = () => new ChimpbaseEngine({
     adapter: storageResources.createAdapter(),
+    blobs: blobsEngineConfig,
     eventBus: storageResources.eventBus,
     platform,
     registry: cloneRegistryForWorkerEngine(registry),
