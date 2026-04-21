@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+## 0.7.0 - 2026-04-21
+
+Workspace reorg — no user-facing API changes.
+
+### Changed
+
+- extracted `tools/swarm` to a sibling repo (now `@chimpbase/deployer`); removed `"tools/*"` from chimpbase workspaces and `tools/**/*.ts` from `tsconfig.json`. Cross-repo wiring now lives in a parent workspace at the shared root.
+
 ## 0.6.0 - 2026-04-18
 
 Adds services and distributed registry via the new `@chimpbase/mesh` plugin.

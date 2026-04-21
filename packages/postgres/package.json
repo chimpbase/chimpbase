@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/postgres",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Reusable Postgres storage adapter for Chimpbase hosts.",
   "license": "Apache-2.0",
   "type": "module",
@@ -37,8 +37,8 @@
     "prepack": "node ../../scripts/build-package.mjs postgres"
   },
   "dependencies": {
-    "@chimpbase/core": "0.6.0",
-    "@chimpbase/runtime": "0.6.0",
+    "@chimpbase/core": "0.7.0",
+    "@chimpbase/runtime": "0.7.0",
     "kysely": "^0.28.11",
     "pg": "^8.16.3"
   },

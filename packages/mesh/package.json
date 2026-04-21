@@ -1,6 +1,6 @@
 {
   "name": "@chimpbase/mesh",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Services and distributed registry plugin for Chimpbase.",
   "license": "Apache-2.0",
   "type": "module",
@@ -38,6 +38,6 @@
     "prepack": "node ../../scripts/build-package.mjs runtime mesh"
   },
   "dependencies": {
-    "@chimpbase/runtime": "0.6.0"
+    "@chimpbase/runtime": "0.7.0"
   }
 }
