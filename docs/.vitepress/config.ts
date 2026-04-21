@@ -83,6 +83,12 @@ export default defineConfig({
           { text: "Contract Testing (Pact)", link: "/pact" },
         ],
       },
+      {
+        text: "Chimpbase Cloud",
+        items: [
+          { text: "CLI (chimpctl)", link: "/cli" },
+        ],
+      },
     ],
     socialLinks: [
       { icon: "github", link: "https://github.com/chimpbase/chimpbase" },
