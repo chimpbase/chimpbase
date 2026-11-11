@@ -320,6 +320,7 @@ function isWorkerHandler(
 const INTERNAL_CRON_QUEUE_NAME = "__chimpbase.cron.run";
 const INTERNAL_SUBSCRIPTION_QUEUE_NAME = "__chimpbase.subscription.run";
 const INTERNAL_WORKFLOW_QUEUE_NAME = "__chimpbase.workflow.run";
+const IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX = "_chimpbase.sub.seen:";
 
 const TELEMETRY_LOG_STREAM = "_chimpbase.logs";
 const MAX_TELEMETRY_RECORDS = 10_000;
@@ -1640,7 +1641,8 @@ export class ChimpbaseEngine {
         list: async (options?: ChimpbaseKvListOptions): Promise<string[]> => {
           const prefix = qualify("kv", options?.prefix ?? "");
           const keys = await this.adapter.kvList({ prefix });
-          if (moduleName === null) return keys;
+          // Idempotent subscription markers share the KV table but are engine bookkeeping, not user data.
+          if (moduleName === null) return keys.filter((key) => !key.startsWith(IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX));
           const namespace = chimpbaseModuleResourcePrefix(moduleName, "kv");
           return keys.map((key) => key.slice(namespace.length));
         },
@@ -3008,7 +3010,7 @@ export class ChimpbaseEngine {
           }
           if (sub.idempotent && event.id !== undefined) {
             const mode = this.isAsyncSubscription(sub) ? "async" : "sync";
-            const key = `_chimpbase.sub.seen:${event.id}:${mode}:${sub.name}`;
+            const key = `${IDEMPOTENT_SUBSCRIPTION_MARKER_PREFIX}${event.id}:${mode}:${sub.name}`;
             if (!reservations.has(key)) {
               const reserved = await this.adapter.query(
                 `INSERT INTO _chimpbase_kv (key, value_json) VALUES (?1, ?2)
