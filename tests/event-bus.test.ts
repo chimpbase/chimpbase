@@ -437,6 +437,24 @@ describe("event bus", () => {
     });
   }
 
+  test("ctx.kv.list hides idempotent subscription markers", async () => {
+    const { db, engine, registry } = await createTestEngine(new NoopEventBus());
+    registry.actions.set("emit", action("emit", async (ctx) => {
+      await ctx.kv.set("user", true);
+      ctx.pubsub.publish("listed", {});
+    }));
+    registry.actions.set("list", action("list", async (ctx, prefix?: string) => await ctx.kv.list({ prefix })));
+    registry.subscriptions.set("listed", [{ name: "listed", idempotent: true, handler: async () => {} }]);
+    try {
+      await engine.executeAction("emit");
+      expect(db.query("SELECT key FROM _chimpbase_kv WHERE key LIKE '_chimpbase.sub.seen:%'").all()).toHaveLength(1);
+      expect((await engine.executeAction("list"))?.result).toEqual(["user"]);
+      expect((await engine.executeAction("list", ["_chimpbase."]))?.result).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   for (const failure of ["completion", "commit"] as const) {
     test(`queue ${failure} failure rolls back worker effects before retry`, async () => {
       const { adapter, db, engine, registry } = await createTestEngine(new NoopEventBus());
