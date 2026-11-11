@@ -335,6 +335,15 @@ export interface ChimpbaseEngineAdapter {
     leaseToken: string,
   ): Promise<void>;
   beginTransaction(): Promise<void>;
+  /**
+   * Optional transaction hook for storage that cannot express a transaction as separate
+   * begin/commit/rollback calls (for example Cloudflare Durable Objects, which forbid
+   * `BEGIN`/`COMMIT` statements). When present, the engine runs every root transaction
+   * through it and never calls `beginTransaction`, `commitTransaction`, or
+   * `rollbackTransaction`. The returned promise must reject, with every write made by the
+   * callback rolled back, when the callback rejects.
+   */
+  runInTransaction?<T>(callback: () => Promise<T>): Promise<T>;
   claimNextCronSchedule(leaseMs: number, scheduleNames: readonly string[]): Promise<ClaimedCronScheduleRow | null>;
   claimNextQueueJob(
     leaseMs: number,
@@ -3060,6 +3069,9 @@ export class ChimpbaseEngine {
   private async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
     const parentDepth = this.transactionDepth;
     const isRootTransaction = parentDepth === 0;
+    if (isRootTransaction && this.adapter.runInTransaction !== undefined) {
+      return await this.runInAdapterTransaction(callback, this.adapter.runInTransaction.bind(this.adapter));
+    }
     let committed = false;
     let cancelPublish: (() => void) | undefined;
 
@@ -3118,6 +3130,67 @@ export class ChimpbaseEngine {
       throw error;
     } finally {
       if (isRootTransaction) this.transactionFailure = undefined;
+    }
+  }
+
+  /**
+   * Root transaction for adapters that own the transaction boundary (`runInTransaction`).
+   * Mirrors the begin/commit path above: the callback, event persistence, and sync
+   * subscriptions run inside the adapter transaction; blob cleanups and event-bus
+   * publishing run only after it commits.
+   */
+  private async runInAdapterTransaction<T>(
+    callback: () => Promise<T>,
+    runInTransaction: <TResult>(callback: () => Promise<TResult>) => Promise<TResult>,
+  ): Promise<T> {
+    let committed = false;
+    let cancelPublish: (() => void) | undefined;
+    this.transactionFailure = undefined;
+
+    try {
+      const result = await runInTransaction(async () => {
+        this.transactionDepth = 1;
+        try {
+          const value = await callback();
+          this.assertTransactionSucceeded();
+          let persistedCount = 0;
+          while (persistedCount < this.pendingEvents.length) {
+            const events = this.pendingEvents.slice(persistedCount);
+            persistedCount = this.pendingEvents.length;
+            await this.adapter.persistEvents(events);
+            await this.dispatchSubscriptions(events.filter((event) =>
+              !this.registry.eventContracts.has(event.name)
+            ), undefined, "sync");
+          }
+          this.assertTransactionSucceeded();
+          this.transactionDepth = 0;
+          cancelPublish = this.eventBus.preparePublish?.(this.pendingEvents);
+          return value;
+        } finally {
+          this.transactionDepth = 0;
+        }
+      });
+      committed = true;
+      await this.runBlobCleanups(true);
+      const justCommitted = this.pendingEvents.splice(0);
+      this.committedEvents.push(...justCommitted);
+      if (justCommitted.length > 0) {
+        try {
+          await this.eventBus.publish(justCommitted);
+        } catch {
+          // The persisted event/outbox is authoritative; buses are wake-up optimizations.
+        }
+      }
+      return result;
+    } catch (error) {
+      if (!committed) {
+        cancelPublish?.();
+        this.pendingEvents.splice(0);
+        await this.runBlobCleanups(false);
+      }
+      throw error;
+    } finally {
+      this.transactionFailure = undefined;
     }
   }
 

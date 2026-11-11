@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- added a preview `chimpbase/runtime/cloudflare` storage adapter for SQLite-backed Cloudflare Durable Objects, with a workerd conformance suite (`bun run test:workerd`)
+- added an optional `runInTransaction` engine adapter hook and optional `transactionSync`/`transaction` hooks on SQLite databases for storage that forbids `BEGIN`/`COMMIT` statements
+
 ## 0.8.0 - 2026-08-29
 
 Consolidates the public API into the single `chimpbase` package and adds business-module boundaries for modular monoliths.

@@ -22,6 +22,7 @@ const expectedExports = {
   "./runtime": "./packages/runtime/dist/index.js",
   "./runtime/bun": "./packages/bun/dist/src/library.js",
   "./runtime/bun/cli": "./packages/bun/dist/src/cli.js",
+  "./runtime/cloudflare": "./packages/cloudflare/dist/src/index.js",
   "./runtime/node": "./packages/node/dist/src/library.js",
   "./runtime/node/cli": "./packages/node/dist/src/cli.js",
   "./tooling": "./packages/tooling/dist/src/index.js",
@@ -43,6 +44,7 @@ const expectedFiles = [
   "packages/auth/dist",
   "packages/blobs/dist",
   "packages/bun/dist",
+  "packages/cloudflare/dist",
   "packages/core/dist",
   "packages/host/dist",
   "packages/mesh/dist",
@@ -75,7 +77,7 @@ const expectedDependencies = {
   typescript: "^5.9.3",
 };
 const expectedScripts = {
-  "build:publish:packages": "node ./scripts/build-package.mjs --publish runtime core tooling postgres host node bun rest-collections otel auth blobs webhooks pact mesh",
+  "build:publish:packages": "node ./scripts/build-package.mjs --publish runtime core tooling postgres host node bun cloudflare rest-collections otel auth blobs webhooks pact mesh",
   "build:check": "node ./scripts/build-package.mjs --check",
   prepack: "bun run build:publish:packages && bun run smoke:package",
   "publish:dry-run": "npm pack --dry-run",

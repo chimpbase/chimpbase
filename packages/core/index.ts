@@ -420,6 +420,7 @@ export { registerChimpbaseModuleImplementations } from "./module-registration.ts
 export { ChimpbaseKyselyDriver, createSqliteKysely, type ChimpbaseKyselyExecutor } from "./sqlite-kysely.ts";
 export { ensureSqliteInternalTables } from "./sqlite-schema.ts";
 export { applySqliteMigrations, assertWorkerInteger } from "./host.ts";
+export { runSqliteImmediateTransaction, type ChimpbaseSqliteSyncTransactionHost } from "./sqlite-transaction.ts";
 export {
   createSqliteEngineAdapter,
   type ChimpbaseSqliteDatabase,

@@ -17,6 +17,7 @@
     "packages/auth/dist",
     "packages/blobs/dist",
     "packages/bun/dist",
+    "packages/cloudflare/dist",
     "packages/core/dist",
     "packages/host/dist",
     "packages/mesh/dist",
@@ -107,6 +108,11 @@
       "import": "./packages/bun/dist/src/cli.js",
       "default": "./packages/bun/dist/src/cli.js"
     },
+    "./runtime/cloudflare": {
+      "types": "./packages/cloudflare/dist/src/index.d.ts",
+      "import": "./packages/cloudflare/dist/src/index.js",
+      "default": "./packages/cloudflare/dist/src/index.js"
+    },
     "./runtime/node": {
       "types": "./packages/node/dist/src/library.d.ts",
       "import": "./packages/node/dist/src/library.js",
@@ -174,7 +180,7 @@
     }
   },
   "scripts": {
-    "build:publish:packages": "node ./scripts/build-package.mjs --publish runtime core tooling postgres host node bun rest-collections otel auth blobs webhooks pact mesh",
+    "build:publish:packages": "node ./scripts/build-package.mjs --publish runtime core tooling postgres host node bun cloudflare rest-collections otel auth blobs webhooks pact mesh",
     "build:check": "node ./scripts/build-package.mjs --check",
     "ci:check": "bun run build:publish:packages && bun run modules:check && bun run typecheck && bun run check:any && bun run test:built && bun run docs:check:built && bun run docs:build && bun run publish:dry-run:built",
     "check:any": "node ./scripts/check-any.mjs",
@@ -199,6 +205,7 @@
     "docs:deploy": "vitepress build docs && wrangler pages deploy docs/.vitepress/dist --project-name chimpbase-docs",
     "test": "bun test --pass-with-no-tests",
     "test:built": "CHIMPBASE_TEST_PREBUILT=1 bun run test",
+    "test:workerd": "node ./scripts/test-workerd.mjs",
     "typecheck": "./node_modules/.bin/tsc --noEmit"
   },
   "dependencies": {
@@ -245,7 +252,9 @@
     "@opentelemetry/sdk-trace-base": "^2.0.0",
     "@types/node": "^24.6.1",
     "bun-types": "^1.3.14",
+    "esbuild": "0.27.3",
     "hono": "^4.12.5",
+    "miniflare": "4.20260421.0",
     "vitepress": "^1.6.4",
     "vue": "3.5.32",
     "@vue/server-renderer": "3.5.32",
