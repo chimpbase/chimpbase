@@ -86,3 +86,9 @@ bun run dev:bun:basic
 
 Run the repository checks with `bun run ci:check`; it builds the public package once and reuses the output for tests, documentation checks and packing. Standalone `bun run docs:check` and `bun run publish:dry-run` still build automatically. Build the documentation with `bun run docs:build`.
 
+
+## License
+
+Chimpbase is licensed under the [Apache License 2.0](LICENSE). Forks and
+redistributions must keep the attribution in [NOTICE](NOTICE), as required
+by Section 4(d) of the license.
