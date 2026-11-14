@@ -14,6 +14,7 @@ import type {
 import { ChimpbasePreconditionFailedError, createChimpbaseEventDeliveryPayloads, paginateChimpbaseBlobMetadata } from "./engine.ts";
 import { createSqliteKysely, type ChimpbaseKyselyExecutor } from "./sqlite-kysely.ts";
 import { assertWorkerInteger, type ChimpbasePlatformShim } from "./host.ts";
+import { runSqliteImmediateTransaction } from "./sqlite-transaction.ts";
 import type {
   ChimpbaseBlobListOptions,
   ChimpbaseBlobPutOptions,
@@ -42,6 +43,19 @@ export interface ChimpbaseSqliteStatement {
 export interface ChimpbaseSqliteDatabase {
   exec(sql: string): unknown;
   query(sql: string): ChimpbaseSqliteStatement;
+  /**
+   * Optional hook for hosts that forbid `BEGIN`/`COMMIT` statements. When present, short
+   * synchronous atomic sections (queue/cron claims, migrations) run through it instead of
+   * `BEGIN IMMEDIATE`.
+   */
+  transactionSync?<T>(callback: () => T): T;
+  /**
+   * Optional hook for hosts that forbid `BEGIN`/`COMMIT` statements. When present, the
+   * engine runs each root transaction (a whole action, route, worker job, ...) inside it
+   * instead of calling `beginTransaction`/`commitTransaction`/`rollbackTransaction`.
+   * The callback's rejection must roll every write made during it back.
+   */
+  transaction?<T>(callback: () => Promise<T>): Promise<T>;
 }
 
 interface PersistedCollectionDocument {
@@ -148,7 +162,20 @@ export function createSqliteEngineAdapter(
   db: ChimpbaseSqliteDatabase,
   platform: ChimpbasePlatformShim,
 ): ChimpbaseEngineAdapter {
+  const adapter = createSqliteEngineAdapterMethods(db, platform);
+  if (db.transaction !== undefined) {
+    adapter.runInTransaction = async <T>(callback: () => Promise<T>): Promise<T> => {
+      if (db.transaction === undefined) throw new Error("SQLite transaction hook was removed");
+      return await db.transaction(callback);
+    };
+  }
+  return adapter;
+}
 
+function createSqliteEngineAdapterMethods(
+  db: ChimpbaseSqliteDatabase,
+  platform: ChimpbasePlatformShim,
+): ChimpbaseEngineAdapter {
   return {
     async advanceCronSchedule(
       scheduleName: string,
@@ -175,6 +202,9 @@ export function createSqliteEngineAdapter(
       }
     },
     async beginTransaction() {
+      if (db.transaction !== undefined) {
+        throw new Error("this SQLite host manages transactions through runInTransaction");
+      }
       db.exec("BEGIN IMMEDIATE");
     },
     async claimNextCronSchedule(
@@ -186,8 +216,7 @@ export function createSqliteEngineAdapter(
       const leaseToken = platform.randomUUID();
       const leaseExpiresAtMs = now + leaseMs;
 
-      db.exec("BEGIN IMMEDIATE");
-      try {
+      return runSqliteImmediateTransaction(db, () => {
         const [schedule] = parseRows(db.query(
           `
             SELECT
@@ -208,7 +237,6 @@ export function createSqliteEngineAdapter(
         ).all(now, JSON.stringify(scheduleNames)), cronScheduleRowValidator, "claimed cron schedule rows");
 
         if (!(schedule !== null && schedule !== undefined)) {
-          db.exec("COMMIT");
           return null;
         }
 
@@ -230,23 +258,14 @@ export function createSqliteEngineAdapter(
         ).run(leaseToken, leaseExpiresAtMs, schedule.schedule_name, schedule.next_fire_at_ms, now);
 
         if (result.changes === 0) {
-          db.exec("COMMIT");
           return null;
         }
 
-        db.exec("COMMIT");
         return {
           ...schedule,
           lease_token: leaseToken,
         };
-      } catch (error) {
-        try {
-          db.exec("ROLLBACK");
-        } catch {
-        }
-
-        throw error;
-      }
+      });
     },
     async claimNextQueueJob(
       leaseMs: number,
@@ -257,8 +276,7 @@ export function createSqliteEngineAdapter(
       const now = platform.now();
       const leaseExpiresAtMs = now + leaseMs;
 
-      db.exec("BEGIN IMMEDIATE");
-      try {
+      return runSqliteImmediateTransaction(db, () => {
         const [job] = parseRows(db.query(
           `
             SELECT
@@ -298,7 +316,6 @@ export function createSqliteEngineAdapter(
         ).all(now, JSON.stringify(queueNames), JSON.stringify(targets)), queueJobRowValidator, "claimed queue job rows");
 
         if (!(job !== null && job !== undefined)) {
-          db.exec("COMMIT");
           return null;
         }
 
@@ -314,19 +331,11 @@ export function createSqliteEngineAdapter(
           `,
         ).run(leaseExpiresAtMs, job.id);
 
-        db.exec("COMMIT");
         return {
           ...job,
           attempt_count: job.attempt_count + 1,
         };
-      } catch (error) {
-        try {
-          db.exec("ROLLBACK");
-        } catch {
-        }
-
-        throw error;
-      }
+      });
     },
     async lockQueueJob(jobId: number, attempt: number): Promise<boolean> {
       return db.query("SELECT id FROM _chimpbase_queue_jobs WHERE id = ?1 AND status = 'processing' AND attempt_count = ?2")
@@ -408,6 +417,9 @@ export function createSqliteEngineAdapter(
       return matched.length;
     },
     async commitTransaction() {
+      if (db.transaction !== undefined) {
+        throw new Error("this SQLite host manages transactions through runInTransaction");
+      }
       db.exec("COMMIT");
     },
     async persistEvents(events: ChimpbaseEventRecord[]) {
@@ -674,6 +686,7 @@ export function createSqliteEngineAdapter(
       ).run(scheduleName, leaseToken);
     },
     async rollbackTransaction() {
+      if (db.transaction !== undefined) return;
       try {
         db.exec("ROLLBACK");
       } catch {

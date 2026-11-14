@@ -1,4 +1,5 @@
 import { splitSqlStatements } from "./sql-ownership.ts";
+import { runSqliteImmediateTransaction } from "./sqlite-transaction.ts";
 
 export interface ChimpbasePlatformShim {
   hashString(input: string): string;
@@ -51,6 +52,7 @@ interface SqliteMigrationDatabase {
     all(...params: string[]): unknown[];
     run(...params: string[]): unknown;
   };
+  transactionSync?<T>(callback: () => T): T;
 }
 
 export function applySqliteMigrations(
@@ -58,8 +60,7 @@ export function applySqliteMigrations(
   migrations: readonly ChimpbaseMigration[],
 ): void {
   if (migrations.length === 0) return;
-  db.exec("BEGIN IMMEDIATE");
-  try {
+  runSqliteImmediateTransaction(db, () => {
     db.exec(`CREATE TABLE IF NOT EXISTS _chimpbase_migrations (
       name TEXT PRIMARY KEY,
       applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -72,11 +73,7 @@ export function applySqliteMigrations(
       db.exec(migration.sql);
       db.query("INSERT INTO _chimpbase_migrations (name) VALUES (?1)").run(migration.name);
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    try { db.exec("ROLLBACK"); } catch { /* SQLite may already have rolled back the transaction. */ }
-    throw error;
-  }
+  });
 }
 
 function assertSqliteMigrationTransaction(migration: ChimpbaseMigration): void {

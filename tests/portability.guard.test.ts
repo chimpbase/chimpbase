@@ -41,7 +41,7 @@ describe("portable package guards", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  for (const packageName of ["core", "runtime", "postgres", "rest-collections"] as const) {
+  for (const packageName of ["core", "runtime", "postgres", "rest-collections", "cloudflare"] as const) {
     test(`@chimpbase/${packageName} stays free of host-specific APIs`, async () => {
       const packageDir = resolve(repoRoot, "packages", packageName);
       const files = await listTypescriptFiles(packageDir);

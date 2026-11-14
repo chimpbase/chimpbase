@@ -25,6 +25,7 @@ Install `chimpbase` with Bun or npm. All public imports are subpaths of that sin
 
 - `chimpbase` and `chimpbase/runtime`: portable runtime DSL and context types.
 - `chimpbase/runtime/bun` and `chimpbase/runtime/node`: explicit host adapters. Portable imports do not select a host.
+- `chimpbase/runtime/cloudflare`: preview storage adapter for SQLite-backed Cloudflare Durable Objects (no HTTP host, scheduler, or blobs yet).
 - `chimpbase/core`, `chimpbase/host`, `chimpbase/postgres`, `chimpbase/tooling`: low-level integration and tooling.
 - `chimpbase/auth`, `chimpbase/blobs`, `chimpbase/mesh`, `chimpbase/otel`, `chimpbase/pact`, `chimpbase/rest-collections`, `chimpbase/webhooks`: optional integrations.
 

@@ -22,6 +22,10 @@ const packageConfigs = {
     dir: "packages/bun",
     types: ["bun-types", "node"],
   },
+  cloudflare: {
+    dir: "packages/cloudflare",
+    types: ["node"],
+  },
   core: {
     dir: "packages/core",
     types: ["node"],
@@ -355,7 +359,7 @@ function internalPublicRoot(specifier) {
   if (packageName === "runtime") {
     return "chimpbase/runtime";
   }
-  if (packageName === "node" || packageName === "bun") {
+  if (packageName === "node" || packageName === "bun" || packageName === "cloudflare") {
     return `chimpbase/runtime/${packageName}`;
   }
   return `chimpbase/${packageName}`;
